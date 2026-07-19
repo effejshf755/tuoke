@@ -12,6 +12,8 @@ import * as userRoles from '../migrations/20260719_000002_user_roles.js';
 import * as consumerRequestIdentity from '../migrations/20260719_000003_consumer_request_identity.js';
 import * as userMonthlyTokenLimit from '../migrations/20260719_000004_user_monthly_token_limit.js';
 import * as userStatus from '../migrations/20260719_000005_user_status.js';
+import * as emailVerificationCodes from '../migrations/20260719_000006_email_verification_codes.js';
+import * as passwordResetCodes from '../migrations/20260719_000007_password_reset_codes.js';
 
 export interface MigrationModule {
   up(db: Db): void;
@@ -36,6 +38,8 @@ export const USER_ROLES_FILENAME = '20260719_000002_user_roles.ts';
 export const CONSUMER_REQUEST_IDENTITY_FILENAME = '20260719_000003_consumer_request_identity.ts';
 export const USER_MONTHLY_TOKEN_LIMIT_FILENAME = '20260719_000004_user_monthly_token_limit.ts';
 export const USER_STATUS_FILENAME = '20260719_000005_user_status.ts';
+export const EMAIL_VERIFICATION_CODES_FILENAME = '20260719_000006_email_verification_codes.ts';
+export const PASSWORD_RESET_CODES_FILENAME = '20260719_000007_password_reset_codes.ts';
 
 export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: LEGACY_BASELINE_FILENAME, module: legacyBaseline },
@@ -51,4 +55,6 @@ export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: CONSUMER_REQUEST_IDENTITY_FILENAME, module: consumerRequestIdentity },
   { filename: USER_MONTHLY_TOKEN_LIMIT_FILENAME, module: userMonthlyTokenLimit },
   { filename: USER_STATUS_FILENAME, module: userStatus },
+  { filename: EMAIL_VERIFICATION_CODES_FILENAME, module: emailVerificationCodes },
+  { filename: PASSWORD_RESET_CODES_FILENAME, module: passwordResetCodes },
 ];

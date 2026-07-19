@@ -1,15 +1,22 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { apiFetch, setToken, UNAUTHORIZED_EVENT, type ApiError } from '@/lib/api'
+
+import {
+  apiFetch,
+  setToken,
+  UNAUTHORIZED_EVENT,
+  type ApiError,
+} from '@/lib/api'
+
 import { Button } from '@/components/ui/button'
 import { FieldError } from '@/components/ui/field-error'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { isEmail } from '@/lib/validate'
 import { useI18n } from '@/i18n'
+import { ForgotPasswordForm } from '@/components/forgot-password-form'
 
-// Matches the server rule (routes/auth.ts zod schema).
 const PASSWORD_MIN = 8
 
 export interface AuthStatus {
@@ -22,19 +29,37 @@ export interface AuthStatus {
 function Centered({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-screen flex items-center justify-center bg-background px-4">
-      <div className="w-full max-w-sm">{children}</div>
+      <div className="w-full max-w-sm">
+        {children}
+      </div>
     </div>
   )
 }
 
-function AuthForm({ mode, onAuthed }: { mode: 'setup' | 'login' | 'register'; onAuthed: () => void }) {
+function AuthForm({
+  mode,
+  onAuthed,
+  onForgot,
+}: {
+  mode: 'setup' | 'login' | 'register'
+  onAuthed: () => void
+  onForgot?: () => void
+}) {
   const { t } = useI18n()
+
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+
+  // 普通用户注册邮箱验证码
+  const [verificationCode, setVerificationCode] = useState('')
+  const [sendingCode, setSendingCode] = useState(false)
+  const [countdown, setCountdown] = useState(0)
+  const [codeMessage, setCodeMessage] = useState('')
+
+  // 首次初始化管理员使用�?setup code
   const [setupCode, setSetupCode] = useState('')
-  // Revealed only after the server asks for it (remote first-run setup). A
-  // browser on the same machine as the server never sees this field.
   const [codeRequired, setCodeRequired] = useState(false)
+
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [attempted, setAttempted] = useState(false)
@@ -42,113 +67,419 @@ function AuthForm({ mode, onAuthed }: { mode: 'setup' | 'login' | 'register'; on
   const isSetup = mode === 'setup'
   const isRegister = mode === 'register'
 
-  // Inline field feedback; the server stays authoritative. Only the setup form
-  // enforces the password minimum client-side (an existing password of any
-  // length must still be able to log in).
+  // ============================================================
+  // 验证码发送倒计�?  // ============================================================
+
+  useEffect(() => {
+    if (countdown <= 0) {
+      return
+    }
+
+    const timer = window.setTimeout(() => {
+      setCountdown((current) => Math.max(0, current - 1))
+    }, 1000)
+
+    return () => {
+      window.clearTimeout(timer)
+    }
+  }, [countdown])
+
+  // ============================================================
+  // 表单校验
+  // ============================================================
+
   const emailError = !email.trim()
     ? t('validation.required')
     : !isEmail(email)
       ? t('validation.email')
       : null
+
   const passwordError = !password
     ? t('validation.required')
-    : isSetup && password.length < PASSWORD_MIN
+    : (isSetup || isRegister) && password.length < PASSWORD_MIN
       ? t('validation.passwordMin', { min: PASSWORD_MIN })
       : null
 
-  async function submit(e: React.FormEvent) {
-    e.preventDefault()
-    if (emailError || passwordError) {
+  const verificationCodeError = isRegister
+    ? !verificationCode.trim()
+      ? 'Please enter the verification code'
+      : !/^\d{6}$/.test(verificationCode.trim())
+        ? 'Verification code must be 6 digits'
+        : null
+    : null
+
+  // ============================================================
+  // 发送注册邮箱验证码
+  // ============================================================
+
+  async function sendVerificationCode() {
+    setError('')
+    setCodeMessage('')
+
+    if (emailError) {
       setAttempted(true)
       return
     }
+
+    if (sendingCode || countdown > 0) {
+      return
+    }
+
+    setSendingCode(true)
+
+    try {
+      await apiFetch<{ success: boolean; message: string }>(
+        '/api/auth/send-register-code',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            email: email.trim(),
+          }),
+        },
+      )
+
+      setCountdown(60)
+      setCodeMessage('Verification code sent. Check your email.')
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setSendingCode(false)
+    }
+  }
+
+  // ============================================================
+  // 登录 / 注册 / 首次初始�?  // ============================================================
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault()
+
+    if (
+      emailError ||
+      passwordError ||
+      (isRegister && verificationCodeError)
+    ) {
+      setAttempted(true)
+      return
+    }
+
     setBusy(true)
     setError('')
+
     try {
-      const payload: Record<string, string> = { email, password }
-      // Only the setup flow carries a code, and only once the server has asked
-      // for it. The server ignores it for local (loopback) setup.
-      if (isSetup && setupCode) payload.setupCode = setupCode.trim()
-      const res = await apiFetch<{ token: string }>(isSetup ? '/api/auth/setup' : isRegister ? '/api/auth/register' : '/api/auth/login', {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      })
+      const payload: Record<string, string> = {
+        email: email.trim(),
+        password,
+      }
+
+      // 普通用户注册必须提交邮箱验证码
+      if (isRegister) {
+        payload.code = verificationCode.trim()
+      }
+
+      // Remote first-run setup code.
+      if (isSetup && setupCode) {
+        payload.setupCode = setupCode.trim()
+      }
+
+      let endpoint = '/api/auth/login'
+
+      if (isSetup) {
+        endpoint = '/api/auth/setup'
+      } else if (isRegister) {
+        endpoint = '/api/auth/register'
+      }
+
+      const res = await apiFetch<{ token: string }>(
+        endpoint,
+        {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        },
+      )
+
       setToken(res.token)
       onAuthed()
     } catch (err) {
-      // The server gates remote first-run setup behind a one-time code; reveal
-      // the field so the operator can paste the code from the server logs.
-      if (isSetup && (err as ApiError).code === 'setup_code_required') {
+      if (
+        isSetup &&
+        (err as ApiError).code === 'setup_code_required'
+      ) {
         setCodeRequired(true)
       }
+
       setError((err as Error).message)
     } finally {
       setBusy(false)
     }
   }
 
+  // ============================================================
+  // 页面标题
+  // ============================================================
+
+  const title = isSetup
+    ? t('auth.createYourAccount')
+    : isRegister
+      ? '创建 Tuoke API 账号'
+      : t('auth.signIn')
+
+  const description = isSetup
+    ? t('auth.setupDescription')
+    : isRegister
+      ? 'Create an account with email verification.'
+      : t('auth.loginDescription')
+
+  const submitText = busy
+    ? isSetup
+      ? t('auth.creating')
+      : isRegister
+        ? '注册�?..'
+        : t('auth.signingIn')
+    : isSetup
+      ? t('auth.createAccount')
+      : isRegister
+        ? '注册'
+        : t('auth.signIn')
+
   return (
     <Centered>
       <div className="mb-6 flex items-center gap-2">
         <span className="inline-block size-2 rounded-full bg-foreground" />
-        <span className="font-semibold tracking-tight text-sm">Tuoke API</span>
+        <span className="font-semibold tracking-tight text-sm">
+          Tuoke API
+        </span>
       </div>
+
       <div className="rounded-3xl border bg-card p-6">
-        <h1 className="text-base font-medium">{isSetup ? t('auth.createYourAccount') : t('auth.signIn')}</h1>
+        <h1 className="text-base font-medium">
+          {title}
+        </h1>
+
         <p className="text-xs text-muted-foreground mt-1 mb-4">
-            {isSetup
-            ? t('auth.setupDescription')
-            : isRegister ? 'Create a user account to manage your API keys.' : t('auth.loginDescription')}
+          {description}
         </p>
-        <form onSubmit={submit} className="space-y-3" noValidate>
+
+        <form
+          onSubmit={submit}
+          className="space-y-3"
+          noValidate
+        >
+          {/* 邮箱 */}
           <div className="space-y-1.5">
-            <Label className="text-xs" htmlFor="auth-email">{t('auth.email')}</Label>
-            <Input
-              id="auth-email"
-              type="email"
-              autoComplete="username"
-              value={email}
-              onChange={e => setEmail(e.target.value)}
-              placeholder={t('auth.emailPlaceholder')}
-              aria-invalid={attempted && !!emailError}
-            />
-            {attempted && <FieldError error={emailError} />}
+            <Label
+              className="text-xs"
+              htmlFor="auth-email"
+            >
+              {t('auth.email')}
+            </Label>
+
+            <div className={isRegister ? 'flex gap-2' : ''}>
+              <Input
+                id="auth-email"
+                type="email"
+                autoComplete="username"
+                value={email}
+                onChange={(e) => {
+                  setEmail(e.target.value)
+                  setCodeMessage('')
+                }}
+                placeholder={t('auth.emailPlaceholder')}
+                aria-invalid={
+                  attempted && !!emailError
+                }
+              />
+
+              {isRegister && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="shrink-0"
+                  disabled={
+                    sendingCode ||
+                    countdown > 0
+                  }
+                  onClick={sendVerificationCode}
+                >
+                  {sendingCode
+                    ? '发送中...'
+                    : countdown > 0
+                      ? `${countdown}s`
+                      : 'Send code'}
+                </Button>
+              )}
+            </div>
+
+            {attempted && (
+              <FieldError error={emailError} />
+            )}
+
+            {isRegister && codeMessage && (
+              <p className="text-xs text-muted-foreground">
+                {codeMessage}
+              </p>
+            )}
           </div>
+
+          {/* 注册邮箱验证�?*/}
+          {isRegister && (
+            <div className="space-y-1.5">
+              <Label
+                className="text-xs"
+                htmlFor="auth-verification-code"
+              >
+                邮箱验证�?              </Label>
+
+              <Input
+                id="auth-verification-code"
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={6}
+                value={verificationCode}
+                onChange={(e) => {
+                  const value = e.target.value
+                    .replace(/\D/g, '')
+                    .slice(0, 6)
+
+                  setVerificationCode(value)
+                }}
+                placeholder="请输�?位验证码"
+                aria-invalid={
+                  attempted &&
+                  !!verificationCodeError
+                }
+              />
+
+              {attempted && (
+                <FieldError
+                  error={verificationCodeError}
+                />
+              )}
+
+              <p className="text-xs text-muted-foreground">
+                验证码有效期�?分钟�?              </p>
+            </div>
+          )}
+
+          {/* 密码 */}
           <div className="space-y-1.5">
-            <Label className="text-xs" htmlFor="auth-password">{t('auth.password')}</Label>
+            <Label
+              className="text-xs"
+              htmlFor="auth-password"
+            >
+              {t('auth.password')}
+            </Label>
+
             <Input
               id="auth-password"
               type="password"
-              autoComplete={isSetup || isRegister ? 'new-password' : 'current-password'}
+              autoComplete={
+                isSetup || isRegister
+                  ? 'new-password'
+                  : 'current-password'
+              }
               value={password}
-              onChange={e => setPassword(e.target.value)}
-              placeholder={isSetup || isRegister ? t('auth.passwordPlaceholderSetup') : t('auth.passwordPlaceholderLogin')}
-              aria-invalid={attempted && !!passwordError}
+              onChange={(e) => {
+                setPassword(e.target.value)
+              }}
+              placeholder={
+                isSetup || isRegister
+                  ? t('auth.passwordPlaceholderSetup')
+                  : t('auth.passwordPlaceholderLogin')
+              }
+              aria-invalid={
+                attempted &&
+                !!passwordError
+              }
             />
-            {attempted && <FieldError error={passwordError} />}
+
+            {attempted && (
+              <FieldError error={passwordError} />
+            )}
           </div>
+
+          {/* 首次远程初始化管理员 Setup Code */}
           {isSetup && codeRequired && (
             <div className="space-y-1.5">
-              <Label className="text-xs" htmlFor="auth-setup-code">{t('auth.setupCode')}</Label>
+              <Label
+                className="text-xs"
+                htmlFor="auth-setup-code"
+              >
+                {t('auth.setupCode')}
+              </Label>
+
               <Input
                 id="auth-setup-code"
                 type="text"
                 autoComplete="off"
                 value={setupCode}
-                onChange={e => setSetupCode(e.target.value)}
-                placeholder={t('auth.setupCodePlaceholder')}
+                onChange={(e) => {
+                  setSetupCode(e.target.value)
+                }}
+                placeholder={
+                  t('auth.setupCodePlaceholder')
+                }
               />
-              <p className="text-xs text-muted-foreground">{t('auth.setupCodeHint')}</p>
+
+              <p className="text-xs text-muted-foreground">
+                {t('auth.setupCodeHint')}
+              </p>
             </div>
           )}
-          {error && <p className="text-destructive text-xs">{error}</p>}
-          <Button type="submit" className="w-full" disabled={busy}>
-            {busy ? (isSetup ? t('auth.creating') : t('auth.signingIn')) : isSetup ? t('auth.createAccount') : isRegister ? 'Register' : t('auth.signIn')}
+
+          {/* 全局错误 */}
+          {error && (
+            <p className="text-destructive text-xs">
+              {error}
+            </p>
+          )}
+
+          {/* 提交 */}
+          <Button
+            type="submit"
+            className="w-full"
+            disabled={busy}
+          >
+            {submitText}
           </Button>
         </form>
+
+        {/* 登录 / 注册切换 */}
+        {!isSetup && !isRegister && onForgot && (
+          <button
+            type="button"
+            className="mt-4 w-full text-xs text-muted-foreground hover:text-foreground"
+            onClick={() => {
+              setError('')
+              setAttempted(false)
+              onForgot()
+            }}
+          >
+            忘记密码？</button>
+        )}
+
         {!isSetup && (
-          <button type="button" className="mt-4 w-full text-xs text-muted-foreground hover:text-foreground" onClick={() => { setError(''); setAttempted(false); (window as any).__AUTH_MODE__ = isRegister ? 'login' : 'register'; window.dispatchEvent(new Event('auth-mode')) }}>
-            {isRegister ? 'Already have an account? Sign in' : 'Create a user account'}
+          <button
+            type="button"
+            className="mt-4 w-full text-xs text-muted-foreground hover:text-foreground"
+            onClick={() => {
+              setError('')
+              setCodeMessage('')
+              setAttempted(false)
+
+              ;(window as any).__AUTH_MODE__ =
+                isRegister
+                  ? 'login'
+                  : 'register'
+
+              window.dispatchEvent(
+                new Event('auth-mode'),
+              )
+            }}
+          >
+            {isRegister
+              ? '已经有账号？立即登录'
+              : 'No account? Register'}
           </button>
         )}
       </div>
@@ -156,54 +487,175 @@ function AuthForm({ mode, onAuthed }: { mode: 'setup' | 'login' | 'register'; on
   )
 }
 
-export function AuthGate({ children }: { children: ReactNode }) {
+export function AuthGate({
+  children,
+}: {
+  children: ReactNode
+}) {
   const { t } = useI18n()
   const queryClient = useQueryClient()
   const location = useLocation()
-  const { data, isLoading, isError, refetch } = useQuery<AuthStatus>({
+
+  const {
+    data,
+    isLoading,
+    isError,
+    refetch,
+  } = useQuery<AuthStatus>({
     queryKey: ['auth-status'],
-    queryFn: () => apiFetch('/api/auth/status'),
+    queryFn: () =>
+      apiFetch('/api/auth/status'),
     retry: false,
   })
 
   useEffect(() => {
-    const handler = () => { refetch() }
-    window.addEventListener(UNAUTHORIZED_EVENT, handler)
-    return () => window.removeEventListener(UNAUTHORIZED_EVENT, handler)
+    const handler = () => {
+      refetch()
+    }
+
+    window.addEventListener(
+      UNAUTHORIZED_EVENT,
+      handler,
+    )
+
+    return () => {
+      window.removeEventListener(
+        UNAUTHORIZED_EVENT,
+        handler,
+      )
+    }
   }, [refetch])
 
   function onAuthed() {
-    // New session: drop any cached (unauthenticated) data and re-check status.
     queryClient.invalidateQueries()
     refetch()
   }
 
-  if (isLoading) return <Centered><p className="text-sm text-muted-foreground text-center">{t('auth.loading')}</p></Centered>
+  if (isLoading) {
+    return (
+      <Centered>
+        <p className="text-sm text-muted-foreground text-center">
+          {t('auth.loading')}
+        </p>
+      </Centered>
+    )
+  }
+
   if (isError || !data) {
     return (
       <Centered>
         <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2.5 text-xs text-destructive">
-          {t('auth.serverUnreachableBefore')}<code className="font-mono">npm run dev</code>{t('auth.serverUnreachableAfter')}
+          {t('auth.serverUnreachableBefore')}
+          <code className="font-mono">
+            npm run dev
+          </code>
+          {t('auth.serverUnreachableAfter')}
         </div>
       </Centered>
     )
   }
 
-  if (data.needsSetup && location.pathname !== '/') return <AuthForm mode="setup" onAuthed={onAuthed} />
-  if (!data.authenticated && location.pathname !== '/') {
-    const mode = ((window as any).__AUTH_MODE__ ?? 'login') as 'login' | 'register'
-    return <AuthModeForm mode={mode} onAuthed={onAuthed} />
+  // 首次初始化管理员
+  if (
+    data.needsSetup &&
+    location.pathname !== '/'
+  ) {
+    return (
+      <AuthForm
+        mode="setup"
+        onAuthed={onAuthed}
+      />
+    )
+  }
+
+  // 普通登�?/ 注册
+  if (
+    !data.authenticated &&
+    location.pathname !== '/'
+  ) {
+    const mode = (
+      (window as any).__AUTH_MODE__ ??
+      'login'
+    ) as 'login' | 'register'
+
+    return (
+      <AuthModeForm
+        mode={mode}
+        onAuthed={onAuthed}
+      />
+    )
   }
 
   return <>{children}</>
 }
 
-function AuthModeForm({ mode, onAuthed }: { mode: 'login' | 'register'; onAuthed: () => void }) {
-  const [currentMode, setCurrentMode] = useState(mode)
+function AuthModeForm({
+  mode,
+  onAuthed,
+}: {
+  mode: 'login' | 'register'
+  onAuthed: () => void
+}) {
+  const [currentMode, setCurrentMode] =
+    useState(mode)
+
+  const [
+    forgotPassword,
+    setForgotPassword,
+  ] = useState(false)
+
   useEffect(() => {
-    const handler = () => setCurrentMode((current) => current === 'login' ? 'register' : 'login')
-    window.addEventListener('auth-mode', handler)
-    return () => window.removeEventListener('auth-mode', handler)
+    const handler = () => {
+      setForgotPassword(false)
+
+      setCurrentMode(
+        (current) =>
+          current === 'login'
+            ? 'register'
+            : 'login',
+      )
+    }
+
+    window.addEventListener(
+      'auth-mode',
+      handler,
+    )
+
+    return () => {
+      window.removeEventListener(
+        'auth-mode',
+        handler,
+      )
+    }
   }, [])
-  return <AuthForm mode={currentMode} onAuthed={onAuthed} />
+
+  if (forgotPassword) {
+    return (
+      <Centered>
+        <div className="mb-6 flex items-center gap-2">
+          <span className="inline-block size-2 rounded-full bg-foreground" />
+          <span className="font-semibold tracking-tight text-sm">
+            Tuoke API
+          </span>
+        </div>
+
+        <ForgotPasswordForm
+          onBack={() => {
+            setForgotPassword(false)
+            setCurrentMode('login')
+          }}
+        />
+      </Centered>
+    )
+  }
+
+  return (
+    <AuthForm
+      mode={currentMode}
+      onAuthed={onAuthed}
+      onForgot={() => {
+        setForgotPassword(true)
+      }}
+    />
+  )
 }

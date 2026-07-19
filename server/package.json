@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@freellmapi/shared": "*",
+    "@types/nodemailer": "^8.0.1",
     "better-sqlite3": "^12.10.0",
     "cors": "^2.8.5",
     "dotenv": "^17.4.2",
@@ -26,6 +27,7 @@
     "express": "^5.1.0",
     "helmet": "^8.1.0",
     "multer": "^2.2.0",
+    "nodemailer": "^9.0.3",
     "socks-proxy-agent": "^10.0.0",
     "undici": "^6.21.0",
     "zod": "^3.24.4"
