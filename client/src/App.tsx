@@ -1,8 +1,8 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, NavLink, Link, useLocation, useNavigate } from 'react-router-dom'
-import { MutationCache, QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MutationCache, QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
 import { ChevronDown, Languages, Menu, MoreHorizontal, Moon, Search, Sun } from 'lucide-react'
-import { buttonVariants } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -36,6 +36,11 @@ import EmbeddingDetailPage from '@/pages/EmbeddingDetailPage'
 import AnalyticsPage from '@/pages/AnalyticsPage'
 import PremiumPage from '@/pages/PremiumPage'
 import NotFoundPage from '@/pages/NotFoundPage'
+import UserCenterPage from '@/pages/UserCenterPage'
+import UserModelsPage from '@/pages/UserModelsPage'
+import ApiDocsPage from '@/pages/ApiDocsPage'
+import AdminUsersPage from '@/pages/AdminUsersPage'
+import PublicHomePage from '@/pages/PublicHomePage'
 
 // Every failed mutation surfaces as an error toast, so no action fails
 // silently. A page that already shows the failure inline can opt out with
@@ -55,6 +60,7 @@ const navItems = [
   { to: '/keys', labelKey: 'nav.keys' },
   { to: '/analytics', labelKey: 'nav.analytics' },
   { to: '/premium', labelKey: 'nav.premium' },
+  { to: '/admin/users', labelKey: 'Users' },
 ]
 
 // The five modality pages behind "Models"; surfaced in the nav dropdown and
@@ -114,15 +120,6 @@ function useDarkMode() {
   return { dark, toggle }
 }
 
-function Brand() {
-  return (
-    <Link to="/" className="flex items-center gap-2 transition-opacity hover:opacity-70">
-      <span className="inline-block size-2 rounded-full bg-foreground" />
-      <span className="font-semibold tracking-tight text-sm">FreeLLMAPI</span>
-    </Link>
-  )
-}
-
 // True when the dashboard runs inside the desktop shell (Electron preload
 // sets this). The navbar then doubles as the window title bar: draggable,
 // padded for the macOS traffic lights, and without the web-only Sign out.
@@ -165,6 +162,8 @@ function Navbar() {
   const { t } = useI18n()
   const location = useLocation()
   const navigate = useNavigate()
+  const { data: authStatus } = useQuery<{ role: 'admin' | 'user' | null }>({ queryKey: ['auth-status'] })
+  const visibleNavItems = authStatus?.role === 'admin' ? navItems : authStatus?.role === 'user' ? [{ to: '/user-center', labelKey: 'Console' }, { to: '/user-models', labelKey: 'Models' }, { to: '/api-docs', labelKey: 'API Docs' }] : [{ to: '/', labelKey: 'Home' }, { to: '/user-models', labelKey: 'Models' }, { to: '/api-docs', labelKey: 'API Docs' }]
 
   function isActiveRoute(to: string) {
     return location.pathname === to
@@ -181,12 +180,12 @@ function Navbar() {
         className={`mx-auto flex max-w-6xl items-center px-4 sm:px-6 ${isDesktopApp ? 'pl-20 sm:pl-20' : ''}`}
         style={isDesktopApp ? { minHeight: 52 } : undefined}
       >
-        <Brand />
+          <Link to="/" className="flex items-center gap-2 transition-opacity hover:opacity-70"><span className="inline-block size-2 rounded-full bg-foreground" /><span className="font-semibold tracking-tight text-sm">Tuoke API</span></Link>
         <nav
           className="ml-10 hidden items-center gap-6 md:flex"
           style={isDesktopApp ? ({ WebkitAppRegion: 'no-drag' } as React.CSSProperties) : undefined}
         >
-          {navItems.map((item) =>
+          {visibleNavItems.map((item) =>
             item.to === '/models' ? (
               // Split control: the label navigates, the chevron reveals the
               // five modality pages hiding behind "Models".
@@ -249,6 +248,7 @@ function Navbar() {
               )}
             </DropdownMenuContent>
           </DropdownMenu>
+          {!authStatus?.role && <div className="ml-2 flex gap-2"><ButtonLink to="/login">登录</ButtonLink><ButtonLink to="/login" register>注册</ButtonLink></div>}
         </div>
         <div className="ml-auto md:hidden">
           <DropdownMenu>
@@ -260,7 +260,7 @@ function Navbar() {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-52">
               <DropdownMenuGroup>
-                {navItems.map((item) =>
+                {visibleNavItems.map((item) =>
                   item.to === '/models' ? (
                     <DropdownMenuSub key={item.to}>
                       <DropdownMenuSubTrigger
@@ -297,6 +297,7 @@ function Navbar() {
                 {!isDesktopApp && (
                   <DropdownMenuItem onClick={() => logout()}>{t('nav.signOut')}</DropdownMenuItem>
                 )}
+                {!authStatus?.role && <><DropdownMenuSeparator /><DropdownMenuItem onClick={() => navigate('/login')}>登录</DropdownMenuItem><DropdownMenuItem onClick={() => { (window as any).__AUTH_MODE__ = 'register'; navigate('/login') }}>注册</DropdownMenuItem></>}
               </DropdownMenuGroup>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -312,6 +313,11 @@ function PageBoundary({ children }: { children: ReactNode }) {
   return <ErrorBoundary key={location.pathname}>{children}</ErrorBoundary>
 }
 
+function ButtonLink({ to, register, children }: { to: string; register?: boolean; children: React.ReactNode }) {
+  const navigate = useNavigate()
+  return <Button size="sm" variant={register ? 'default' : 'outline'} onClick={() => { if (register) (window as any).__AUTH_MODE__ = 'register'; navigate(to) }}>{children}</Button>
+}
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -323,7 +329,8 @@ function App() {
             <main className="max-w-6xl mx-auto px-6 py-8">
               <PageBoundary>
               <Routes>
-                <Route path="/" element={<Navigate to="/models/chat" replace />} />
+                <Route path="/" element={<PublicHomePage />} />
+                <Route path="/login" element={<Navigate to="/" replace />} />
                 <Route path="/models" element={<Navigate to="/models/chat" replace />} />
                 <Route path="/models/chat" element={<FallbackPage />} />
                 <Route path="/models/chat/:id" element={<ModelDetailPage />} />
@@ -339,6 +346,10 @@ function App() {
                 <Route path="/fallback" element={<Navigate to="/models/chat" replace />} />
                 <Route path="/analytics" element={<AnalyticsPage />} />
                 <Route path="/premium" element={<PremiumPage />} />
+                <Route path="/user-center" element={<UserCenterPage />} />
+                <Route path="/user-models" element={<UserModelsPage />} />
+                <Route path="/api-docs" element={<ApiDocsPage />} />
+                <Route path="/admin/users" element={<AdminUsersPage />} />
                 <Route path="/test" element={<Navigate to="/playground" replace />} />
                 <Route path="/health" element={<Navigate to="/keys" replace />} />
                 <Route path="*" element={<NotFoundPage />} />

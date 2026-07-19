@@ -20,7 +20,12 @@ import { cacheRouter } from './routes/cache.js';
 import { authRouter } from './routes/auth.js';
 import { docsRouter } from './routes/docs.js';
 import { mcpRouter } from './routes/mcp.js';
+import { consumerApiKeysRouter } from './routes/consumer-api-keys.js';
+import { userRouter } from './routes/user.js';
+import { adminUsersRouter } from './routes/admin-users.js';
 import { requireAuth } from './middleware/requireAuth.js';
+import { requireAdmin } from './middleware/requireAdmin.js';
+import { consumerQuota } from './middleware/consumerQuota.js';
 import { createProxyRateLimiter } from './middleware/rateLimit.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { clientContextMiddleware } from './lib/client-context.js';
@@ -70,17 +75,20 @@ export function createApp(config?: Config) {
   app.use('/api/auth', authRouter);
 
   // API routes — all admin endpoints sit behind requireAuth.
-  app.use('/api/keys', requireAuth, keysRouter);
-  app.use('/api/models', requireAuth, modelsRouter);
-  app.use('/api/profiles', requireAuth, profilesRouter);
-  app.use('/api/fallback', requireAuth, fallbackRouter);
-  app.use('/api/embeddings', requireAuth, embeddingsRouter);
-  app.use('/api/media', requireAuth, mediaRouter);
-  app.use('/api/analytics', requireAuth, analyticsRouter);
-  app.use('/api/health', requireAuth, healthRouter);
-  app.use('/api/settings', requireAuth, settingsRouter);
-  app.use('/api/premium', requireAuth, premiumRouter);
-  app.use('/api/cache', requireAuth, cacheRouter);
+  app.use('/api/keys', requireAuth, requireAdmin, keysRouter);
+  app.use('/api/models', requireAuth, requireAdmin, modelsRouter);
+  app.use('/api/profiles', requireAuth, requireAdmin, profilesRouter);
+  app.use('/api/fallback', requireAuth, requireAdmin, fallbackRouter);
+  app.use('/api/embeddings', requireAuth, requireAdmin, embeddingsRouter);
+  app.use('/api/media', requireAuth, requireAdmin, mediaRouter);
+  app.use('/api/analytics', requireAuth, requireAdmin, analyticsRouter);
+  app.use('/api/health', requireAuth, requireAdmin, healthRouter);
+  app.use('/api/settings', requireAuth, requireAdmin, settingsRouter);
+  app.use('/api/premium', requireAuth, requireAdmin, premiumRouter);
+  app.use('/api/cache', requireAuth, requireAdmin, cacheRouter);
+  app.use('/api/consumer-keys', requireAuth, consumerApiKeysRouter);
+  app.use('/api/user', requireAuth, userRouter);
+  app.use('/api/admin/users', requireAuth, requireAdmin, adminUsersRouter);
 
   // Static, unauthenticated API reference: GET /v1/docs (viewer) and
   // GET /v1/openapi.json (spec). Mounted before the rate limiter so the docs
@@ -91,7 +99,7 @@ export function createApp(config?: Config) {
   // OpenAI-compatible proxy. Per-IP rate limiting (#35 item #6) runs first so
   // it throttles unauthenticated brute-force / flood attempts before any
   // routing work. Tune via PROXY_RATE_LIMIT_RPM; 0 disables it.
-  app.use('/v1', createProxyRateLimiter(cfg.proxyRateLimitRpm));
+  app.use('/v1', consumerQuota, createProxyRateLimiter(cfg.proxyRateLimitRpm));
   // Anthropic-compatible Messages API (`POST /v1/messages`, `/count_tokens`) for
   // Claude Code and anything else speaking the Anthropic SDK. Mounted BEFORE the
   // OpenAI router so it can content-negotiate `GET /v1/models` (Anthropic shape

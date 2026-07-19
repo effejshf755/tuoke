@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
+import { useLocation } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiFetch, setToken, UNAUTHORIZED_EVENT, type ApiError } from '@/lib/api'
 import { Button } from '@/components/ui/button'
@@ -11,10 +12,11 @@ import { useI18n } from '@/i18n'
 // Matches the server rule (routes/auth.ts zod schema).
 const PASSWORD_MIN = 8
 
-interface AuthStatus {
+export interface AuthStatus {
   needsSetup: boolean
   authenticated: boolean
   email: string | null
+  role: 'admin' | 'user' | null
 }
 
 function Centered({ children }: { children: ReactNode }) {
@@ -25,7 +27,7 @@ function Centered({ children }: { children: ReactNode }) {
   )
 }
 
-function AuthForm({ mode, onAuthed }: { mode: 'setup' | 'login'; onAuthed: () => void }) {
+function AuthForm({ mode, onAuthed }: { mode: 'setup' | 'login' | 'register'; onAuthed: () => void }) {
   const { t } = useI18n()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -38,6 +40,7 @@ function AuthForm({ mode, onAuthed }: { mode: 'setup' | 'login'; onAuthed: () =>
   const [attempted, setAttempted] = useState(false)
 
   const isSetup = mode === 'setup'
+  const isRegister = mode === 'register'
 
   // Inline field feedback; the server stays authoritative. Only the setup form
   // enforces the password minimum client-side (an existing password of any
@@ -66,7 +69,7 @@ function AuthForm({ mode, onAuthed }: { mode: 'setup' | 'login'; onAuthed: () =>
       // Only the setup flow carries a code, and only once the server has asked
       // for it. The server ignores it for local (loopback) setup.
       if (isSetup && setupCode) payload.setupCode = setupCode.trim()
-      const res = await apiFetch<{ token: string }>(isSetup ? '/api/auth/setup' : '/api/auth/login', {
+      const res = await apiFetch<{ token: string }>(isSetup ? '/api/auth/setup' : isRegister ? '/api/auth/register' : '/api/auth/login', {
         method: 'POST',
         body: JSON.stringify(payload),
       })
@@ -88,14 +91,14 @@ function AuthForm({ mode, onAuthed }: { mode: 'setup' | 'login'; onAuthed: () =>
     <Centered>
       <div className="mb-6 flex items-center gap-2">
         <span className="inline-block size-2 rounded-full bg-foreground" />
-        <span className="font-semibold tracking-tight text-sm">FreeLLMAPI</span>
+        <span className="font-semibold tracking-tight text-sm">Tuoke API</span>
       </div>
       <div className="rounded-3xl border bg-card p-6">
         <h1 className="text-base font-medium">{isSetup ? t('auth.createYourAccount') : t('auth.signIn')}</h1>
         <p className="text-xs text-muted-foreground mt-1 mb-4">
-          {isSetup
+            {isSetup
             ? t('auth.setupDescription')
-            : t('auth.loginDescription')}
+            : isRegister ? 'Create a user account to manage your API keys.' : t('auth.loginDescription')}
         </p>
         <form onSubmit={submit} className="space-y-3" noValidate>
           <div className="space-y-1.5">
@@ -116,10 +119,10 @@ function AuthForm({ mode, onAuthed }: { mode: 'setup' | 'login'; onAuthed: () =>
             <Input
               id="auth-password"
               type="password"
-              autoComplete={isSetup ? 'new-password' : 'current-password'}
+              autoComplete={isSetup || isRegister ? 'new-password' : 'current-password'}
               value={password}
               onChange={e => setPassword(e.target.value)}
-              placeholder={isSetup ? t('auth.passwordPlaceholderSetup') : t('auth.passwordPlaceholderLogin')}
+              placeholder={isSetup || isRegister ? t('auth.passwordPlaceholderSetup') : t('auth.passwordPlaceholderLogin')}
               aria-invalid={attempted && !!passwordError}
             />
             {attempted && <FieldError error={passwordError} />}
@@ -140,9 +143,14 @@ function AuthForm({ mode, onAuthed }: { mode: 'setup' | 'login'; onAuthed: () =>
           )}
           {error && <p className="text-destructive text-xs">{error}</p>}
           <Button type="submit" className="w-full" disabled={busy}>
-            {busy ? (isSetup ? t('auth.creating') : t('auth.signingIn')) : isSetup ? t('auth.createAccount') : t('auth.signIn')}
+            {busy ? (isSetup ? t('auth.creating') : t('auth.signingIn')) : isSetup ? t('auth.createAccount') : isRegister ? 'Register' : t('auth.signIn')}
           </Button>
         </form>
+        {!isSetup && (
+          <button type="button" className="mt-4 w-full text-xs text-muted-foreground hover:text-foreground" onClick={() => { setError(''); setAttempted(false); (window as any).__AUTH_MODE__ = isRegister ? 'login' : 'register'; window.dispatchEvent(new Event('auth-mode')) }}>
+            {isRegister ? 'Already have an account? Sign in' : 'Create a user account'}
+          </button>
+        )}
       </div>
     </Centered>
   )
@@ -151,6 +159,7 @@ function AuthForm({ mode, onAuthed }: { mode: 'setup' | 'login'; onAuthed: () =>
 export function AuthGate({ children }: { children: ReactNode }) {
   const { t } = useI18n()
   const queryClient = useQueryClient()
+  const location = useLocation()
   const { data, isLoading, isError, refetch } = useQuery<AuthStatus>({
     queryKey: ['auth-status'],
     queryFn: () => apiFetch('/api/auth/status'),
@@ -180,8 +189,21 @@ export function AuthGate({ children }: { children: ReactNode }) {
     )
   }
 
-  if (data.needsSetup) return <AuthForm mode="setup" onAuthed={onAuthed} />
-  if (!data.authenticated) return <AuthForm mode="login" onAuthed={onAuthed} />
+  if (data.needsSetup && location.pathname !== '/') return <AuthForm mode="setup" onAuthed={onAuthed} />
+  if (!data.authenticated && location.pathname !== '/') {
+    const mode = ((window as any).__AUTH_MODE__ ?? 'login') as 'login' | 'register'
+    return <AuthModeForm mode={mode} onAuthed={onAuthed} />
+  }
 
   return <>{children}</>
+}
+
+function AuthModeForm({ mode, onAuthed }: { mode: 'login' | 'register'; onAuthed: () => void }) {
+  const [currentMode, setCurrentMode] = useState(mode)
+  useEffect(() => {
+    const handler = () => setCurrentMode((current) => current === 'login' ? 'register' : 'login')
+    window.addEventListener('auth-mode', handler)
+    return () => window.removeEventListener('auth-mode', handler)
+  }, [])
+  return <AuthForm mode={currentMode} onAuthed={onAuthed} />
 }

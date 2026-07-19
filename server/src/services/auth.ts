@@ -11,6 +11,7 @@ const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 export interface SessionUser {
   userId: number;
   email: string;
+  role: 'admin' | 'user';
 }
 
 function sha256(s: string): string {
@@ -36,19 +37,20 @@ export function createUser(email: string, password: string): SessionUser {
     err.code = 'email_taken';
     throw err;
   }
-  const result = db.prepare('INSERT INTO users (email, password_hash) VALUES (?, ?)')
-    .run(normalized, hashPassword(password));
-  return { userId: Number(result.lastInsertRowid), email: normalized };
+  const role = userCount() === 0 ? 'admin' : 'user';
+  const result = db.prepare('INSERT INTO users (email, password_hash, role) VALUES (?, ?, ?)')
+    .run(normalized, hashPassword(password), role);
+  return { userId: Number(result.lastInsertRowid), email: normalized, role };
 }
 
 /** Verify credentials. Returns the user on success, null on failure. */
 export function verifyCredentials(email: string, password: string): SessionUser | null {
   const db = getDb();
-  const row = db.prepare('SELECT id, email, password_hash FROM users WHERE email = ?')
-    .get(normalizeEmail(email)) as { id: number; email: string; password_hash: string } | undefined;
+  const row = db.prepare("SELECT id, email, password_hash, role, status FROM users WHERE email = ? AND status = 'active'")
+    .get(normalizeEmail(email)) as { id: number; email: string; password_hash: string; role: 'admin' | 'user'; status: 'active' | 'disabled' } | undefined;
   if (!row) return null;
   if (!verifyPassword(password, row.password_hash)) return null;
-  return { userId: row.id, email: row.email };
+  return { userId: row.id, email: row.email, role: row.role };
 }
 
 /** Mint a session and return the raw token (only the hash is persisted). */
@@ -64,16 +66,17 @@ export function validateSession(token: string | undefined | null): SessionUser |
   if (!token) return null;
   const db = getDb();
   const row = db.prepare(`
-    SELECT s.user_id, s.expires_at_ms, u.email
+    SELECT s.user_id, s.expires_at_ms, u.email, u.role, u.status
     FROM sessions s JOIN users u ON u.id = s.user_id
     WHERE s.token_hash = ?
-  `).get(sha256(token)) as { user_id: number; expires_at_ms: number; email: string } | undefined;
+  `).get(sha256(token)) as { user_id: number; expires_at_ms: number; email: string; role: 'admin' | 'user'; status: 'active' | 'disabled' } | undefined;
   if (!row) return null;
+  if (row.status === 'disabled') return null;
   if (row.expires_at_ms < Date.now()) {
     db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(sha256(token));
     return null;
   }
-  return { userId: row.user_id, email: row.email };
+  return { userId: row.user_id, email: row.email, role: row.role };
 }
 
 export function deleteSession(token: string | undefined | null): void {

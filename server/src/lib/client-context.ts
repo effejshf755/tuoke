@@ -4,6 +4,8 @@ import type { NextFunction, Request, Response } from 'express';
 export interface ClientContext {
   ip: string | null;
   userAgent: string | null;
+  consumerUserId: number | null;
+  consumerApiKeyId: number | null;
 }
 
 // Request-scoped caller identity, readable from anywhere below the middleware
@@ -31,13 +33,21 @@ function clientLoggingEnabled(): boolean {
 
 export function clientContextMiddleware(req: Request, _res: Response, next: NextFunction): void {
   if (!clientLoggingEnabled()) {
-    storage.run({ ip: null, userAgent: null }, next);
+    storage.run({ ip: null, userAgent: null, consumerUserId: null, consumerApiKeyId: null }, next);
     return;
   }
   const ua = req.headers['user-agent'];
-  storage.run({ ip: resolveClientIp(req), userAgent: typeof ua === 'string' ? ua.slice(0, 256) : null }, next);
+  storage.run({ ip: resolveClientIp(req), userAgent: typeof ua === 'string' ? ua.slice(0, 256) : null, consumerUserId: null, consumerApiKeyId: null }, next);
 }
 
 export function getClientContext(): ClientContext {
-  return storage.getStore() ?? { ip: null, userAgent: null };
+  return storage.getStore() ?? { ip: null, userAgent: null, consumerUserId: null, consumerApiKeyId: null };
+}
+
+export function setConsumerIdentity(userId: number, keyId: number): void {
+  const context = storage.getStore();
+  if (context) {
+    context.consumerUserId = userId;
+    context.consumerApiKeyId = keyId;
+  }
 }

@@ -25,6 +25,8 @@ import type { Platform } from '@freellmapi/shared/types.js';
 import { inferQuotaPoolKey, type QuotaObservationContext } from '../services/provider-quota.js';
 import { isUnifyEnabled, getModelGroups, resolveRequestedIdToMembers } from '../services/model-groups.js';
 import { buildModelListing } from '../services/model-listing.js';
+import { validateConsumerApiKey } from '../services/consumer-api-keys.js';
+import { setConsumerIdentity } from '../lib/client-context.js';
 
 export const proxyRouter = Router();
 
@@ -44,6 +46,11 @@ function isAutoModel(modelId: string | undefined): boolean {
 // length and per-character timing, which a network attacker could in principle
 // use to recover the key one byte at a time.
 export function timingSafeStringEqual(provided: string, expected: string): boolean {
+  if (provided.startsWith('tuoke-')) {
+    const consumerKey = validateConsumerApiKey(getDb(), provided);
+    if (consumerKey) setConsumerIdentity(consumerKey.userId, consumerKey.id);
+    return consumerKey !== null;
+  }
   // Use HMAC to produce fixed-length digests so timingSafeEqual always
   // receives same-length buffers regardless of input length. This eliminates
   // both the per-character timing leak and the length-branch timing leak that
