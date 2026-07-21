@@ -31,6 +31,64 @@ export interface ModelListing {
   autoContextWindow: number | null;
 }
 
+/**
+ * Consumer keys must only discover models that can actually be called by a
+ * billed user: the model is enabled, an enabled provider key can serve it, and
+ * the administrator has enabled a billing rule for it.
+ *
+ * This deliberately stays a query-time filter. The administrator's catalog
+ * and billing pages continue to use the complete model inventory.
+ */
+export function getConsumerCallableCanonicalIds(): Set<string> {
+  const db = getDb();
+  const rows = db.prepare(`
+    SELECT DISTINCT m.id AS modelDbId, m.model_id AS modelId
+    FROM models m
+    JOIN model_billing_rules b
+      ON b.platform = m.platform
+     AND b.model_id = m.model_id
+     AND b.billing_enabled = 1
+    WHERE m.enabled = 1
+      AND EXISTS (
+        SELECT 1
+        FROM api_keys k
+        WHERE k.platform = m.platform
+          AND k.enabled = 1
+          AND (m.key_id IS NULL OR k.id = m.key_id)
+      )
+  `).all() as Array<{ modelDbId: number; modelId: string }>;
+
+  if (!isUnifyEnabled()) {
+    return new Set(rows.map(row => row.modelId));
+  }
+
+  const callableModelDbIds = new Set(rows.map(row => row.modelDbId));
+  return new Set(
+    getModelGroups()
+      .filter(group => group.members.some(member => callableModelDbIds.has(member.model_db_id)))
+      .map(group => group.canonicalId),
+  );
+}
+
+/**
+ * Apply the consumer visibility policy to a shared catalog listing.
+ * Consumer callers never receive disabled, keyless, or unconfigured models.
+ */
+export function filterModelListingForConsumer(listing: ModelListing): ModelListing {
+  const callableIds = getConsumerCallableCanonicalIds();
+  const models = listing.models.filter(model =>
+    callableIds.has(model.id) && model.available === 1,
+  );
+  const contextWindows = models
+    .map(model => model.contextWindow)
+    .filter((value): value is number => value != null);
+
+  return {
+    models,
+    autoContextWindow: contextWindows.length ? Math.max(...contextWindows) : null,
+  };
+}
+
 export function buildModelListing(): ModelListing {
   const availableExpr = `
     (CASE WHEN m.enabled = 1 AND EXISTS (

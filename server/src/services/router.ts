@@ -18,6 +18,7 @@ import { parseBudget } from '../lib/budget.js';
 import { platformDropsResponseFormat } from '../lib/sampling-params.js';
 import { isUnifyEnabled, getModelGroups, resolveRequestedIdToMembers } from './model-groups.js';
 import { getActiveProfileId } from './profile-models.js';
+import { getModelBillingRule } from './billing.js';
 import type { BaseProvider } from '../providers/base.js';
 import type { Platform } from '@freellmapi/shared/types.js';
 import type { Db } from '../db/types.js';
@@ -527,6 +528,13 @@ export interface ResolvedChain {
   strategyKey: string;
 }
 
+// A stopped billing rule also disables the route. This keeps explicit model
+// selection from reaching a provider route that the admin has turned off.
+function isBillingRouteEnabled(db: Db, entry: Pick<ChainRow, 'platform' | 'model_id'>): boolean {
+  const rule = getModelBillingRule(db, entry.platform, entry.model_id);
+  return !rule || rule.billingEnabled === 1;
+}
+
 const GLOBAL_SORT_ALIASES: Record<string, string> = {
   smart: 'smart', smartest: 'smart', intelligence: 'smart',
   fast: 'fast', fastest: 'fast', speed: 'fast',
@@ -826,6 +834,7 @@ export function routePinnedModel(modelDbId: number, estimatedTokens = 1000, skip
   const db = getDb();
   const entry = getModelChainRow(db, modelDbId);
   if (!entry) return null;
+  if (!isBillingRouteEnabled(db, entry)) return null;
   if (entry.context_window != null && estimatedTokens > entry.context_window) return null;
   if (entry.tpm_limit != null && estimatedTokens > entry.tpm_limit) return null;
   return selectKeyForModel(entry, estimatedTokens, skipKeys);
@@ -1012,7 +1021,8 @@ export function routeRequest(estimatedTokens = 1000, skipKeys?: Set<string>, pre
   const strategy = getRoutingStrategy();
   if (strategy !== 'priority') refreshStatsCache(db);
 
-  const chain = (prefetchedChain ?? getActiveChain(db)).filter(e => e.enabled);
+  const chain = (prefetchedChain ?? getActiveChain(db))
+    .filter(e => e.enabled && isBillingRouteEnabled(db, e));
 
   const sortedChain = orderChain(chain, strategy);
 
@@ -1038,7 +1048,7 @@ export function routeRequest(estimatedTokens = 1000, skipKeys?: Set<string>, pre
         WHERE m.id = ? AND m.enabled = 1
       `).get(preferredModelDbId) as ChainRow | undefined;
       
-      if (pinnedRow) {
+      if (pinnedRow && isBillingRouteEnabled(db, pinnedRow)) {
         sortedChain.unshift(pinnedRow);
       }
     }

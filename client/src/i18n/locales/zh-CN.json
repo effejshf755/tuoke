@@ -14,6 +14,15 @@
     "switchToChinese": "切换到中文",
     "switchToEnglish": "Switch to English",
     "modelsMenu": "浏览模型类型"
+    ,"home": "首页"
+    ,"console": "控制台"
+    ,"apiDocs": "API 文档"
+    ,"users": "用户管理"
+    ,"dashboard": "控制台"
+    ,"billing": "模型计费"
+    ,"recharge": "充值订单"
+    ,"settings": "系统设置"
+    ,"wallet": "钱包"
   },
   "auth": {
     "createYourAccount": "创建账号",

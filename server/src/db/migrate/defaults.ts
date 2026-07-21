@@ -14,6 +14,13 @@ import * as userMonthlyTokenLimit from '../migrations/20260719_000004_user_month
 import * as userStatus from '../migrations/20260719_000005_user_status.js';
 import * as emailVerificationCodes from '../migrations/20260719_000006_email_verification_codes.js';
 import * as passwordResetCodes from '../migrations/20260719_000007_password_reset_codes.js';
+import * as consumerApiKeyEnabled from '../migrations/20260719_000008_consumer_api_key_enabled.js';
+import * as billingSystem from '../migrations/20260719_000009_billing_system.js';
+import * as walletReservations from '../migrations/20260719_000010_wallet_reservations.js';
+import * as rechargeOrders from '../migrations/20260720_000011_recharge_orders.js';
+import * as platformSettings from '../migrations/20260720_000012_platform_settings.js';
+import * as bonusWalletTransaction from '../migrations/20260720_000013_bonus_wallet_transaction.js';
+import * as playgroundConversations from '../migrations/20260720_000014_playground_conversations.js';
 
 export interface MigrationModule {
   up(db: Db): void;
@@ -40,6 +47,13 @@ export const USER_MONTHLY_TOKEN_LIMIT_FILENAME = '20260719_000004_user_monthly_t
 export const USER_STATUS_FILENAME = '20260719_000005_user_status.ts';
 export const EMAIL_VERIFICATION_CODES_FILENAME = '20260719_000006_email_verification_codes.ts';
 export const PASSWORD_RESET_CODES_FILENAME = '20260719_000007_password_reset_codes.ts';
+export const CONSUMER_API_KEY_ENABLED_FILENAME = '20260719_000008_consumer_api_key_enabled.ts';
+export const BILLING_SYSTEM_FILENAME = '20260719_000009_billing_system.ts';
+export const WALLET_RESERVATIONS_FILENAME = '20260719_000010_wallet_reservations.ts';
+export const RECHARGE_ORDERS_FILENAME = '20260720_000011_recharge_orders.ts';
+export const PLATFORM_SETTINGS_FILENAME = '20260720_000012_platform_settings.ts';
+export const BONUS_WALLET_TRANSACTION_FILENAME = '20260720_000013_bonus_wallet_transaction.ts';
+export const PLAYGROUND_CONVERSATIONS_FILENAME = '20260720_000014_playground_conversations.ts';
 
 export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: LEGACY_BASELINE_FILENAME, module: legacyBaseline },
@@ -57,4 +71,11 @@ export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: USER_STATUS_FILENAME, module: userStatus },
   { filename: EMAIL_VERIFICATION_CODES_FILENAME, module: emailVerificationCodes },
   { filename: PASSWORD_RESET_CODES_FILENAME, module: passwordResetCodes },
+  { filename: CONSUMER_API_KEY_ENABLED_FILENAME, module: consumerApiKeyEnabled },
+  { filename: BILLING_SYSTEM_FILENAME, module: billingSystem },
+  { filename: WALLET_RESERVATIONS_FILENAME, module: walletReservations },
+  { filename: RECHARGE_ORDERS_FILENAME, module: rechargeOrders },
+  { filename: PLATFORM_SETTINGS_FILENAME, module: platformSettings },
+  { filename: BONUS_WALLET_TRANSACTION_FILENAME, module: bonusWalletTransaction },
+{ filename: PLAYGROUND_CONVERSATIONS_FILENAME, module: playgroundConversations },
 ];

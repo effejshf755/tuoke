@@ -24,7 +24,7 @@ import { enforceJsonContent } from '../lib/structured-output.js';
 import type { Platform } from '@freellmapi/shared/types.js';
 import { inferQuotaPoolKey, type QuotaObservationContext } from '../services/provider-quota.js';
 import { isUnifyEnabled, getModelGroups, resolveRequestedIdToMembers } from '../services/model-groups.js';
-import { buildModelListing } from '../services/model-listing.js';
+import { buildModelListing, filterModelListingForConsumer } from '../services/model-listing.js';
 import { validateConsumerApiKey } from '../services/consumer-api-keys.js';
 import { setConsumerIdentity } from '../lib/client-context.js';
 
@@ -223,11 +223,19 @@ proxyRouter.get('/models', (req: Request, res: Response) => {
   // window among models that can serve a request right now. Advertising null
   // makes OpenAI-compatible clients (opencode, Continue) fall back to their own
   // conservative default and truncate long inputs before they reach us (#282).
-  const { models: allListed, autoContextWindow } = buildModelListing();
+  const consumerRequest = token.startsWith('tuoke-');
+  const catalog = consumerRequest
+    ? filterModelListingForConsumer(buildModelListing())
+    : buildModelListing();
+  const { models: allListed, autoContextWindow } = catalog;
 
   const q = String(req.query.available ?? req.query.connected ?? '').toLowerCase();
   const onlyAvailable = q === '1' || q === 'true' || q === 'yes';
-  const listed = onlyAvailable ? allListed.filter(m => m.available === 1) : allListed;
+  const listed = consumerRequest
+    ? allListed
+    : onlyAvailable
+      ? allListed.filter(m => m.available === 1)
+      : allListed;
 
   res.json({
     object: 'list',
@@ -243,8 +251,8 @@ proxyRouter.get('/models', (req: Request, res: Response) => {
         // OpenAI-compatible clients read; emit both so whichever a client
         // looks for is populated. Additive — clients ignore unknown fields.
         context_length: autoContextWindow,
-        available: true,
-        unavailable_reason: null,
+        available: autoContextWindow != null,
+        unavailable_reason: autoContextWindow != null ? null : 'no_models',
       },
       {
         id: FUSION_MODEL_ID,
@@ -968,7 +976,7 @@ proxyRouter.post('/completions', async (req: Request, res: Response) => {
   });
 });
 
-proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
+export async function chatCompletionHandler(req: Request, res: Response) {
   const start = Date.now();
   const requestGroupId = getRequestGroupId(req);
   res.setHeader('X-Request-ID', requestGroupId);
@@ -978,7 +986,8 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
   // not a reliable authorization boundary.
   const token = extractApiToken(req);
   const unifiedKey = getUnifiedApiKey();
-  if (!token || !timingSafeStringEqual(token, unifiedKey)) {
+  const dashboardUser = (req as Request & { user?: { userId?: number } }).user?.userId;
+  if (!dashboardUser && (!token || !timingSafeStringEqual(token, unifiedKey))) {
     res.status(401).json({
       error: { message: 'Invalid API key', type: 'authentication_error' },
     });
@@ -1949,7 +1958,9 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
       res.status(exhaustion.status).json({ error: { message: exhaustion.message, type: exhaustion.type } });
     },
   });
-});
+}
+
+proxyRouter.post('/chat/completions', chatCompletionHandler);
 
 // logRequest moved to lib/request-log.ts (shared with the fusion service to
 // avoid an import cycle); imported above for internal use and re-exported here

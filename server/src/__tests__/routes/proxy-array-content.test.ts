@@ -1,10 +1,11 @@
-import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterEach, afterAll, vi } from 'vitest';
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
 import { initDb, getDb, getUnifiedApiKey } from '../../db/index.js';
 import { mintDashboardToken, isGatedApiPath } from '../helpers/auth.js';
 
 let dashToken = '';
+let nativeFetch: typeof fetch;
 
 async function request(app: Express, method: string, path: string, body?: any, headers: Record<string, string> = {}) {
   const server = app.listen(0);
@@ -38,9 +39,15 @@ describe('OpenAI multimodal array content', () => {
     initDb(':memory:');
     app = createApp();
     dashToken = mintDashboardToken();
+    nativeFetch = global.fetch;
   });
 
   beforeEach(async () => {
+    vi.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
+      const target = typeof url === 'string' ? url : url.toString();
+      if (target.startsWith('http://127.0.0.1:')) return nativeFetch(url, init);
+      return { ok: false, status: 403, json: async () => ({ error: { message: 'test provider forbidden' } }) } as any;
+    });
     const db = getDb();
     db.prepare('DELETE FROM api_keys').run();
     db.prepare('DELETE FROM requests').run();
@@ -54,6 +61,12 @@ describe('OpenAI multimodal array content', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
+    // The outbound-fetch guard is restored after each test and reinstalled
+    // by the next test's setup below when needed.
+  });
+
+  afterAll(() => {
     vi.restoreAllMocks();
   });
 

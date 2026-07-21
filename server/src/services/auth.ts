@@ -38,9 +38,20 @@ export function createUser(email: string, password: string): SessionUser {
     throw err;
   }
   const role = userCount() === 0 ? 'admin' : 'user';
-  const result = db.prepare('INSERT INTO users (email, password_hash, role) VALUES (?, ?, ?)')
-    .run(normalized, hashPassword(password), role);
-  return { userId: Number(result.lastInsertRowid), email: normalized, role };
+  const create = db.transaction(() => {
+    const result = db.prepare('INSERT INTO users (email, password_hash, role) VALUES (?, ?, ?)')
+      .run(normalized, hashPassword(password), role);
+    const setting = db.prepare("SELECT value FROM settings WHERE key = 'new_user_bonus_micro'").get() as { value: string } | undefined;
+    const bonus = Number(setting?.value ?? 0);
+    if (role === 'user' && bonus > 0) {
+      const updated = db.prepare('UPDATE users SET balance_micro = balance_micro + ? WHERE id = ?').run(bonus, result.lastInsertRowid);
+      if (updated.changes !== 1) throw new Error('Failed to grant registration bonus');
+      db.prepare("INSERT INTO wallet_transactions (user_id, type, delta_micro, balance_after_micro, note) VALUES (?, 'bonus', ?, ?, 'New user registration bonus')").run(result.lastInsertRowid, bonus, bonus);
+    }
+    return Number(result.lastInsertRowid);
+  });
+  const userId = create();
+  return { userId, email: normalized, role };
 }
 
 /** Verify credentials. Returns the user on success, null on failure. */

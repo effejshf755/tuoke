@@ -148,6 +148,13 @@ describe('resolveRequestedIdToMembers', () => {
   it('resolves an explicit "platform:model_id" member', () => {
     expect(resolveRequestedIdToMembers('groq:openai/gpt-oss-120b', groups)!.sort()).toEqual([1, 2, 3, 4, 5]);
   });
+  it('merges same raw model ids across provider-specific display-name groups', () => {
+    const duplicateIdGroups = groupRows([
+      row(10, 'custom', 'poolside/laguna-m.1:free', 'poolside/laguna-m.1:free'),
+      row(11, 'openrouter', 'poolside/laguna-m.1:free', 'Poolside Laguna M.1 (free)'),
+    ], NO_OVERRIDES);
+    expect(resolveRequestedIdToMembers('poolside/laguna-m.1:free', duplicateIdGroups)!.sort()).toEqual([10, 11]);
+  });
   it('returns null for an unknown id', () => {
     expect(resolveRequestedIdToMembers('does-not-exist', groups)).toBeNull();
   });

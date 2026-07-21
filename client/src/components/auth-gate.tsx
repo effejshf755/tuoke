@@ -46,6 +46,12 @@ function AuthForm({
   onForgot?: () => void
 }) {
   const { t } = useI18n()
+  const registrationSettings = useQuery<{ registration_enabled: boolean }>({
+    queryKey: ['public-platform-settings'],
+    queryFn: () => apiFetch('/api/public/settings'),
+    enabled: mode === 'register',
+    retry: false,
+  })
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -113,6 +119,10 @@ function AuthForm({
   // ============================================================
 
   async function sendVerificationCode() {
+    if (isRegister && registrationSettings.data?.registration_enabled === false) {
+      setError('当前暂未开放注册')
+      return
+    }
     setError('')
     setCodeMessage('')
 
@@ -152,6 +162,11 @@ function AuthForm({
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
+
+    if (isRegister && registrationSettings.data?.registration_enabled === false) {
+      setError('当前暂未开放注册')
+      return
+    }
 
     if (
       emailError ||
@@ -434,11 +449,17 @@ function AuthForm({
             </p>
           )}
 
+          {isRegister && registrationSettings.data?.registration_enabled === false && (
+            <p className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+              当前暂未开放注册
+            </p>
+          )}
+
           {/* 提交 */}
           <Button
             type="submit"
             className="w-full"
-            disabled={busy}
+            disabled={busy || (isRegister && registrationSettings.data?.registration_enabled === false)}
           >
             {submitText}
           </Button>

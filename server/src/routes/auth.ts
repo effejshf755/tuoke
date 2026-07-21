@@ -26,6 +26,7 @@ import {
   createRegistrationCode,
   verifyRegistrationCode,
 } from '../services/email-verification.js';
+import { getSetting } from '../db/index.js';
 
 export const authRouter = Router();
 
@@ -418,6 +419,7 @@ authRouter.post(
 // ============================================================
 
 authRouter.post('/register', (req: Request, res: Response) => {
+  if (getSetting('registration_enabled') === '0') { res.status(403).json({ error: { message: 'Registration is currently closed', type: 'registration_disabled' } }); return; }
   const parsed = registerSchema.safeParse(req.body);
 
   if (!parsed.success) {

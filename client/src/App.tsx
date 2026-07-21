@@ -24,7 +24,9 @@ import { I18nProvider, useI18n, SUPPORTED_LOCALES, type Locale } from '@/i18n'
 import { logout } from '@/lib/api'
 import { toast } from '@/lib/toast'
 import KeysPage from '@/pages/KeysPage'
+import UserApiKeysPage from '@/pages/UserApiKeysPage'
 import PlaygroundPage from '@/pages/PlaygroundPage'
+import AccountSettingsPage from '@/pages/AccountSettingsPage'
 import FallbackPage from '@/pages/FallbackPage'
 import ModelDetailPage from '@/pages/ModelDetailPage'
 import FusionPage from '@/pages/FusionPage'
@@ -38,8 +40,13 @@ import PremiumPage from '@/pages/PremiumPage'
 import NotFoundPage from '@/pages/NotFoundPage'
 import UserCenterPage from '@/pages/UserCenterPage'
 import UserModelsPage from '@/pages/UserModelsPage'
+import UserAnalyticsPage from '@/pages/UserAnalyticsPage'
 import ApiDocsPage from '@/pages/ApiDocsPage'
 import AdminUsersPage from '@/pages/AdminUsersPage'
+import AdminBillingPage from '@/pages/AdminBillingPage'
+import AdminRechargePage from '@/pages/AdminRechargePage'
+import AdminDashboardPage from '@/pages/AdminDashboardPage'
+import AdminSettingsPage from '@/pages/AdminSettingsPage'
 import PublicHomePage from '@/pages/PublicHomePage'
 
 // Every failed mutation surfaces as an error toast, so no action fails
@@ -60,7 +67,11 @@ const navItems = [
   { to: '/keys', labelKey: 'nav.keys' },
   { to: '/analytics', labelKey: 'nav.analytics' },
   { to: '/premium', labelKey: 'nav.premium' },
-  { to: '/admin/users', labelKey: 'Users' },
+  { to: '/admin/users', labelKey: 'nav.users' },
+  { to: '/admin/dashboard', labelKey: 'nav.dashboard' },
+  { to: '/admin/billing', labelKey: 'nav.billing' },
+  { to: '/admin/recharge', labelKey: 'nav.recharge' },
+  { to: '/admin/settings', labelKey: 'nav.settings' },
 ]
 
 // The five modality pages behind "Models"; surfaced in the nav dropdown and
@@ -163,7 +174,7 @@ function Navbar() {
   const location = useLocation()
   const navigate = useNavigate()
   const { data: authStatus } = useQuery<{ role: 'admin' | 'user' | null }>({ queryKey: ['auth-status'] })
-  const visibleNavItems = authStatus?.role === 'admin' ? navItems : authStatus?.role === 'user' ? [{ to: '/user-center', labelKey: 'Console' }, { to: '/user-models', labelKey: 'Models' }, { to: '/api-docs', labelKey: 'API Docs' }] : [{ to: '/', labelKey: 'Home' }, { to: '/user-models', labelKey: 'Models' }, { to: '/api-docs', labelKey: 'API Docs' }]
+  const visibleNavItems = authStatus?.role === 'admin' ? navItems : authStatus?.role === 'user' ? [{ to: '/user-center', labelKey: 'nav.console' }, { to: '/playground', labelKey: 'nav.playground' }, { to: '/user-models', labelKey: 'nav.models' }, { to: '/analytics', labelKey: 'nav.analytics' }] : [{ to: '/', labelKey: 'nav.home' }, { to: '/user-models', labelKey: 'nav.models' }]
 
   function isActiveRoute(to: string) {
     return location.pathname === to
@@ -239,6 +250,8 @@ function Navbar() {
                 <span>{t('nav.theme')}</span>
                 {dark ? <Sun /> : <Moon />}
               </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => navigate('/api-docs')}>API 文档</DropdownMenuItem>
+              {authStatus?.role === 'user' && <DropdownMenuItem onClick={() => navigate('/keys')}>API 密钥</DropdownMenuItem>}
               <LanguageSubMenu />
               {!isDesktopApp && (
                 <>
@@ -289,6 +302,8 @@ function Navbar() {
               </DropdownMenuGroup>
               <DropdownMenuSeparator />
               <DropdownMenuGroup>
+                <DropdownMenuItem onClick={() => navigate('/api-docs')}>API 文档</DropdownMenuItem>
+                {authStatus?.role === 'user' && <DropdownMenuItem onClick={() => navigate('/keys')}>API 密钥</DropdownMenuItem>}
                 <DropdownMenuItem onClick={toggle} className="justify-between">
                   <span>{t('nav.theme')}</span>
                   {dark ? <Sun /> : <Moon />}
@@ -305,6 +320,21 @@ function Navbar() {
       </div>
     </header>
   )
+}
+
+function KeysRoute() {
+  const { data } = useQuery<{ role: 'admin' | 'user' | null }>({ queryKey: ['auth-status'] })
+  return data?.role === 'admin' ? <KeysPage /> : <UserApiKeysPage />
+}
+
+function ModelsRoute() {
+  const { data } = useQuery<{ role: 'admin' | 'user' | null }>({ queryKey: ['auth-status'] })
+  return data?.role === 'user' ? <UserModelsPage /> : <Navigate to="/models/chat" replace />
+}
+
+function AnalyticsRoute() {
+  const { data } = useQuery<{ role: 'admin' | 'user' | null }>({ queryKey: ['auth-status'] })
+  return data?.role === 'admin' ? <AnalyticsPage /> : <UserAnalyticsPage />
 }
 
 // Keyed by pathname so navigating away from a crashed page resets the boundary.
@@ -331,7 +361,7 @@ function App() {
               <Routes>
                 <Route path="/" element={<PublicHomePage />} />
                 <Route path="/login" element={<Navigate to="/" replace />} />
-                <Route path="/models" element={<Navigate to="/models/chat" replace />} />
+                <Route path="/models" element={<ModelsRoute />} />
                 <Route path="/models/chat" element={<FallbackPage />} />
                 <Route path="/models/chat/:id" element={<ModelDetailPage />} />
                 <Route path="/models/fusion" element={<FusionPage />} />
@@ -342,14 +372,19 @@ function App() {
                 <Route path="/models/audio" element={<AudioPage />} />
                 <Route path="/models/audio/:id" element={<MediaDetailPage modality="audio" />} />
                 <Route path="/playground" element={<PlaygroundPage />} />
-                <Route path="/keys" element={<KeysPage />} />
+                <Route path="/keys" element={<KeysRoute />} />
                 <Route path="/fallback" element={<Navigate to="/models/chat" replace />} />
-                <Route path="/analytics" element={<AnalyticsPage />} />
+                <Route path="/analytics" element={<AnalyticsRoute />} />
                 <Route path="/premium" element={<PremiumPage />} />
                 <Route path="/user-center" element={<UserCenterPage />} />
+                <Route path="/account-settings" element={<AccountSettingsPage />} />
                 <Route path="/user-models" element={<UserModelsPage />} />
                 <Route path="/api-docs" element={<ApiDocsPage />} />
                 <Route path="/admin/users" element={<AdminUsersPage />} />
+                <Route path="/admin/dashboard" element={<AdminDashboardPage />} />
+                <Route path="/admin/billing" element={<AdminBillingPage />} />
+                <Route path="/admin/recharge" element={<AdminRechargePage />} />
+                <Route path="/admin/settings" element={<AdminSettingsPage />} />
                 <Route path="/test" element={<Navigate to="/playground" replace />} />
                 <Route path="/health" element={<Navigate to="/keys" replace />} />
                 <Route path="*" element={<NotFoundPage />} />

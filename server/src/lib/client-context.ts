@@ -6,12 +6,23 @@ export interface ClientContext {
   userAgent: string | null;
   consumerUserId: number | null;
   consumerApiKeyId: number | null;
+  walletReservationId: number | null;
 }
 
 // Request-scoped caller identity, readable from anywhere below the middleware
 // without threading parameters through every logRequest() call site (the chat
 // proxy, responses, anthropic, fusion, embeddings and media paths all log).
 const storage = new AsyncLocalStorage<ClientContext>();
+
+function createContext(ip: string | null, userAgent: string | null): ClientContext {
+  const context = { ip, userAgent } as ClientContext;
+  Object.defineProperties(context, {
+    consumerUserId: { value: null, writable: true, enumerable: false },
+    consumerApiKeyId: { value: null, writable: true, enumerable: false },
+    walletReservationId: { value: null, writable: true, enumerable: false },
+  });
+  return context;
+}
 
 // First X-Forwarded-For hop when present (reverse-proxy deployments, e.g.
 // Traefik), otherwise the socket peer address. The server is LAN-only, so a
@@ -33,15 +44,15 @@ function clientLoggingEnabled(): boolean {
 
 export function clientContextMiddleware(req: Request, _res: Response, next: NextFunction): void {
   if (!clientLoggingEnabled()) {
-    storage.run({ ip: null, userAgent: null, consumerUserId: null, consumerApiKeyId: null }, next);
+    storage.run(createContext(null, null), next);
     return;
   }
   const ua = req.headers['user-agent'];
-  storage.run({ ip: resolveClientIp(req), userAgent: typeof ua === 'string' ? ua.slice(0, 256) : null, consumerUserId: null, consumerApiKeyId: null }, next);
+  storage.run(createContext(resolveClientIp(req), typeof ua === 'string' ? ua.slice(0, 256) : null), next);
 }
 
 export function getClientContext(): ClientContext {
-  return storage.getStore() ?? { ip: null, userAgent: null, consumerUserId: null, consumerApiKeyId: null };
+  return storage.getStore() ?? createContext(null, null);
 }
 
 export function setConsumerIdentity(userId: number, keyId: number): void {
@@ -49,5 +60,17 @@ export function setConsumerIdentity(userId: number, keyId: number): void {
   if (context) {
     context.consumerUserId = userId;
     context.consumerApiKeyId = keyId;
+  }
+}
+
+
+export function setWalletReservationId(
+  reservationId: number | null,
+): void {
+  const context = storage.getStore();
+
+  if (context) {
+    context.walletReservationId =
+      reservationId;
   }
 }

@@ -22,7 +22,13 @@ import { docsRouter } from './routes/docs.js';
 import { mcpRouter } from './routes/mcp.js';
 import { consumerApiKeysRouter } from './routes/consumer-api-keys.js';
 import { userRouter } from './routes/user.js';
+import { userWalletRouter } from './routes/user-wallet.js';
+import { userRechargeRouter, adminRechargeRouter } from './routes/recharge.js';
 import { adminUsersRouter } from './routes/admin-users.js';
+import { adminBillingRouter } from './routes/admin-billing.js';
+import { adminWalletRouter } from './routes/admin-wallet.js';
+import { adminDashboardRouter } from './routes/admin-dashboard.js';
+import { adminPlatformSettingsRouter } from './routes/admin-platform-settings.js';
 import { requireAuth } from './middleware/requireAuth.js';
 import { requireAdmin } from './middleware/requireAdmin.js';
 import { consumerQuota } from './middleware/consumerQuota.js';
@@ -31,6 +37,8 @@ import { errorHandler } from './middleware/errorHandler.js';
 import { clientContextMiddleware } from './lib/client-context.js';
 import type { Config } from './lib/config.js';
 import { loadConfig } from './lib/config.js';
+import { getSetting } from './db/index.js';
+import { publicPlatformRouter } from './routes/public-platform.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -73,6 +81,7 @@ export function createApp(config?: Config) {
   // session; everything else under /api/* requires a logged-in dashboard user.
   // The /v1 proxy keeps its own unified-API-key auth and is NOT gated here.
   app.use('/api/auth', authRouter);
+  app.use('/api/public', publicPlatformRouter);
 
   // API routes — all admin endpoints sit behind requireAuth.
   app.use('/api/keys', requireAuth, requireAdmin, keysRouter);
@@ -87,8 +96,15 @@ export function createApp(config?: Config) {
   app.use('/api/premium', requireAuth, requireAdmin, premiumRouter);
   app.use('/api/cache', requireAuth, requireAdmin, cacheRouter);
   app.use('/api/consumer-keys', requireAuth, consumerApiKeysRouter);
+  app.use('/api/user/wallet', requireAuth, userWalletRouter);
+  app.use('/api/user/recharge', requireAuth, userRechargeRouter);
   app.use('/api/user', requireAuth, userRouter);
   app.use('/api/admin/users', requireAuth, requireAdmin, adminUsersRouter);
+  app.use('/api/admin/billing', requireAuth, requireAdmin, adminBillingRouter);
+  app.use('/api/admin/wallet', requireAuth, requireAdmin, adminWalletRouter);
+  app.use('/api/admin/dashboard', requireAuth, requireAdmin, adminDashboardRouter);
+  app.use('/api/admin/recharge', requireAuth, requireAdmin, adminRechargeRouter);
+  app.use('/api/admin/settings', requireAuth, requireAdmin, adminPlatformSettingsRouter);
 
   // Static, unauthenticated API reference: GET /v1/docs (viewer) and
   // GET /v1/openapi.json (spec). Mounted before the rate limiter so the docs
@@ -99,7 +115,10 @@ export function createApp(config?: Config) {
   // OpenAI-compatible proxy. Per-IP rate limiting (#35 item #6) runs first so
   // it throttles unauthenticated brute-force / flood attempts before any
   // routing work. Tune via PROXY_RATE_LIMIT_RPM; 0 disables it.
-  app.use('/v1', consumerQuota, createProxyRateLimiter(cfg.proxyRateLimitRpm));
+  app.use('/v1', (req, res, next) => {
+    if (getSetting('maintenance_mode') === '1') { res.status(503).json({ error: { message: 'Service is under maintenance', type: 'maintenance_mode' } }); return; }
+    next();
+  }, consumerQuota, createProxyRateLimiter(cfg.proxyRateLimitRpm));
   // Anthropic-compatible Messages API (`POST /v1/messages`, `/count_tokens`) for
   // Claude Code and anything else speaking the Anthropic SDK. Mounted BEFORE the
   // OpenAI router so it can content-negotiate `GET /v1/models` (Anthropic shape

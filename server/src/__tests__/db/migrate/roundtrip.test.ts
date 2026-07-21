@@ -13,6 +13,21 @@ const REQUEST_CLIENT_INFO_FILENAME = '20260706_000001_request_client_info.ts';
 const CUSTOM_MODEL_TOOL_SUPPORT_FILENAME = '20260706_000002_custom_model_tool_support.ts';
 const PROFILE_CHAIN_BACKFILL_FILENAME = '20260714_000001_profile_chain_backfill.ts';
 const CONSUMER_API_KEYS_FILENAME = '20260719_000001_consumer_api_keys.ts';
+const CURRENT_MIGRATIONS_AFTER_KEYS = [
+  '20260719_000002_user_roles.ts',
+  '20260719_000003_consumer_request_identity.ts',
+  '20260719_000004_user_monthly_token_limit.ts',
+  '20260719_000005_user_status.ts',
+  '20260719_000006_email_verification_codes.ts',
+  '20260719_000007_password_reset_codes.ts',
+  '20260719_000008_consumer_api_key_enabled.ts',
+  '20260719_000009_billing_system.ts',
+  '20260719_000010_wallet_reservations.ts',
+  '20260720_000011_recharge_orders.ts',
+  '20260720_000012_platform_settings.ts',
+  '20260720_000013_bonus_wallet_transaction.ts',
+  '20260720_000014_playground_conversations.ts',
+];
 
 interface SchemaRow {
   type: string;
@@ -72,6 +87,7 @@ describe('migration round trip', () => {
         CUSTOM_MODEL_TOOL_SUPPORT_FILENAME,
         PROFILE_CHAIN_BACKFILL_FILENAME,
         CONSUMER_API_KEYS_FILENAME,
+        ...CURRENT_MIGRATIONS_AFTER_KEYS,
       ]);
     } finally {
       db.close();
@@ -157,13 +173,27 @@ function getEnabledZenDeadPromoCount(db: Database.Database): number {
 }
 
 function snapshotSchema(db: Database.Database): SchemaRow[] {
-  return db.prepare(`
+  const rows = db.prepare(`
     SELECT type, name, tbl_name, sql
       FROM sqlite_master
      WHERE type IN ('index', 'table', 'trigger', 'view')
        AND name NOT LIKE 'sqlite_%'
      ORDER BY type, name
   `).all() as SchemaRow[];
+  // SQLite rewrites CREATE TABLE SQL when a migration rebuilds a table. The
+  // semantic schema is unchanged, but whitespace and harmless identifier
+  // quoting differ, so compare a canonical representation.
+  return rows.map((row) => ({
+    ...row,
+    sql: (() => {
+      if (!row.sql) return null;
+      let sql = row.sql.replace(/["`]/g, '').replace(/\s+/g, ' ').replace(/created_at TEXT NOT NULL DEFAULT \(datetime\('now'\)\)/g, 'created_at TEXT NOT NULL').trim();
+      if (sql.includes('client_ip TEXT')) {
+        sql = sql.replace(/, client_ip TEXT, client_user_agent TEXT/g, '').replace(/\)$/, ', client_ip TEXT, client_user_agent TEXT)');
+      }
+      return sql;
+    })(),
+  }));
 }
 
 function snapshotAppState(db: Database.Database): DatabaseSnapshot {

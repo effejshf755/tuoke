@@ -1,3 +1,5 @@
+import { chargeRequest } from '../services/billing.js';
+import { chargeReservedRequest } from '../services/reserved-billing.js';
 import { getDb } from '../db/index.js';
 import { pruneRequestAnalytics } from '../services/request-retention.js';
 import { getClientContext } from './client-context.js';
@@ -88,10 +90,75 @@ export function logRequest(
       if (createdAt?.created_at) {
         setSettingIfMissing(db, 'first_request_at', createdAt.created_at);
       }
+
+      /*
+       * Return the real database request id so billing can settle
+       * the exact request that was just logged.
+       */
+      return Number(insert.lastInsertRowid);
     });
-    tx();
+
+    const requestId = tx();
+
+    /*
+     * Automatic PAYG settlement.
+     *
+     * chargeRequest decides whether the request is:
+     * - consumer billable
+     * - admin/system exempt
+     * - free
+     * - failed/non-billable
+     * - missing a billing rule
+     */
+    try {
+      const reservationId =
+        getClientContext()
+          .walletReservationId;
+
+      const billingResult =
+        reservationId !== null
+          ? chargeReservedRequest(
+              db,
+              requestId,
+              reservationId,
+            )
+          : chargeRequest(
+              db,
+              requestId,
+            );
+
+      if (
+        billingResult.status ===
+        'no_billing_rule'
+      ) {
+        console.warn(
+          '[Billing] No billing rule:',
+          requestId,
+          platform,
+          modelId,
+        );
+      }
+
+      if (
+        billingResult.status ===
+        'insufficient_balance'
+      ) {
+        console.warn(
+          '[Billing] Insufficient balance during settlement:',
+          requestId,
+        );
+      }
+    } catch (billingError) {
+      console.error(
+        '[Billing] Settlement failed:',
+        requestId,
+        billingError,
+      );
+    }
 
     pruneRequestAnalytics({ db });
+
+    return requestId;
   } catch (e) {
     console.error('Failed to log request:', e);
   }

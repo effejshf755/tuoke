@@ -204,12 +204,15 @@ export function resolveRequestedIdToMembers(requested: string, groups: ModelGrou
   const byCanonical = groups.find(g => g.canonicalId === requested);
   if (byCanonical) return byCanonical.members.map(m => m.model_db_id);
 
-  for (const g of groups) {
-    if (g.members.some(m => m.model_id === requested || memberId(m) === requested)) {
-      return g.members.map(m => m.model_db_id);
-    }
-  }
-  return null;
+  // A raw model_id can appear in multiple groups when provider display names
+  // differ (for example a custom model name versus a provider-suffixed name).
+  // Resolve every matching group so an explicitly requested model can fail over
+  // across all configured providers, including custom endpoint bindings.
+  const matchingGroups = groups.filter(g =>
+    g.members.some(m => m.model_id === requested || memberId(m) === requested),
+  );
+  if (matchingGroups.length === 0) return null;
+  return [...new Set(matchingGroups.flatMap(g => g.members.map(m => m.model_db_id)))];
 }
 
 // ── DB convenience ───────────────────────────────────────────────────────────

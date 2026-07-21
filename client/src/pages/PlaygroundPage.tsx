@@ -1,538 +1,70 @@
-import { useState, useRef, useEffect } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { ChevronRight, CircleAlert } from 'lucide-react'
-import { apiFetch } from '@/lib/api'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams, Link } from 'react-router-dom'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { ArrowUp, Bot, ChevronDown, Menu, MessageSquarePlus, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Search, Settings2, SlidersHorizontal, Trash2, UserCircle, X } from 'lucide-react'
+import { apiFetch, getToken } from '@/lib/api'
 import { Button } from '@/components/ui/button'
-import { ModelCombobox } from '@/components/model-combobox'
-import { buildModelOptions } from '@/lib/model-groups'
-import { PageHeader } from '@/components/page-header'
+import { Textarea } from '@/components/ui/textarea'
 import { Markdown } from '@/components/markdown'
-import { CopyButton } from '@/components/copy-button'
-import { useI18n } from '@/i18n'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 
-interface FallbackEntry {
-  modelDbId: number
-  priority: number
-  enabled: boolean
-  platform: string
-  modelId: string
-  displayName: string
-  sizeLabel: string
-  intelligenceRank: number
-  keyCount: number
-}
+type Model = { model_id: string; display_name: string; platform: string }
+type Usage = { model?: string; prompt_tokens?: number; completion_tokens?: number; total_tokens?: number; cost_micro?: number }
+type Message = { role: 'user' | 'assistant'; content: string; meta?: Usage }
+type Conversation = { id: number; title: string; modelId: string; systemPrompt?: string; updatedAt: string }
+type ConversationMessage = { role: 'user' | 'assistant'; content: string; model?: string; promptTokens?: number; completionTokens?: number; totalTokens?: number; costMicro?: number }
 
-interface ChatMessage {
-  role: 'user' | 'assistant'
-  content: string
-  // Request-level failure rendered as a distinct error bubble, not a fake
-  // assistant reply.
-  isError?: boolean
-  meta?: {
-    platform?: string
-    model?: string
-    latency?: number
-    fallbackAttempts?: number
-    // Fusion responses: the panel models (with their answers, for the
-    // collapsible trace) and the judge that synthesized them (null when not
-    // synthesized — single survivor / best_of). `fusionStreaming` is true while
-    // panel/judge frames are still arriving.
-    fusionPanel?: FusionPanelEntry[]
-    fusionJudge?: { platform: string; model: string } | null
-    fusionStreaming?: boolean
-  }
-}
+const iconButton = 'inline-flex size-8 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-accent hover:text-foreground'
+function formatNumber(value?: number) { return new Intl.NumberFormat().format(Number(value ?? 0)) }
 
-interface FusionPanelEntry {
-  platform: string
-  model: string
-  status?: 'ok' | 'failed'
-  content?: string
-  error?: string
-}
-
-// Render a fusion panel/judge entry as "platform/model", but avoid doubling
-// the provider when the model id already carries it (e.g. openrouter/owl-alpha,
-// groq/compound) — those would otherwise read "openrouter/openrouter/owl-alpha".
-function fusionRouteLabel(p: { platform: string; model: string }): string {
-  return p.model.startsWith(`${p.platform}/`) ? p.model : `${p.platform}/${p.model}`
-}
-
-// Collapsible, minimal-font trace shown OUTSIDE the main answer bubble: each
-// panel model's raw answer as it streamed in, plus the judge that synthesized
-// the final answer. Default-open so you can watch it work; collapse to tuck away.
-function FusionTrace({ panel, judge, streaming, answerStarted }: {
-  panel: FusionPanelEntry[]
-  judge?: { platform: string; model: string } | null
-  streaming?: boolean
-  answerStarted?: boolean
+function PlaygroundSidebar({ conversations, activeId, collapsed, mobileOpen, onToggle, onNew, onSelect, onDelete }: {
+  conversations: Conversation[]; activeId: number | null; collapsed: boolean; mobileOpen: boolean; onToggle: () => void; onNew: () => void; onSelect: (c: Conversation) => void; onDelete: (c: Conversation) => void
 }) {
-  const { t } = useI18n()
-  // Open while the panel streams in so you can watch it work; auto-collapse the
-  // moment the final answer STARTS streaming (first token in the bubble), so it
-  // tucks away as the answer takes over — unless the user manually toggled it.
-  const [open, setOpen] = useState(true)
-  const touched = useRef(false)
-  useEffect(() => {
-    if (answerStarted && !touched.current) setOpen(false)
-  }, [answerStarted])
-  return (
-    <div className="w-full text-[10px] leading-snug text-muted-foreground/80">
-      <button
-        type="button"
-        onClick={() => { touched.current = true; setOpen(o => !o) }}
-        className="inline-flex items-center gap-1 font-mono hover:text-foreground transition-colors"
-      >
-        <ChevronRight className={`size-3 transition-transform ${open ? 'rotate-90' : ''}`} />
-        {t('playground.fusionTrace', { count: panel.length })}{streaming ? ' …' : ''}
-      </button>
-      {open && (
-        <div className="mt-1 space-y-2 border-l border-border/60 pl-2.5">
-          {panel.map((p, i) => (
-            <div key={i} className="space-y-0.5">
-              <span className="font-mono font-medium">{fusionRouteLabel(p)}</span>
-              {p.status === 'failed'
-                ? <span className="ml-1.5 text-amber-600 dark:text-amber-400">{t('playground.fusionFailed')}{p.error ? `: ${p.error}` : ''}</span>
-                : p.content
-                  ? <div className="whitespace-pre-wrap opacity-80">{p.content}</div>
-                  : <span className="ml-1.5 opacity-60">…</span>}
-            </div>
-          ))}
-          {judge && (
-            <div className="pt-1.5 border-t border-border/60">
-              <span className="font-mono font-medium">{fusionRouteLabel(judge)}</span>
-              <span className="ml-1.5 opacity-70">{t('playground.fusionJudgeSynth')}</span>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  )
+  const [search, setSearch] = useState('')
+  const searchRef = useRef<HTMLInputElement>(null)
+  const filtered = conversations.filter(c => c.title.toLowerCase().includes(search.toLowerCase()))
+  const openSearch = () => {
+    if (collapsed) onToggle()
+    window.setTimeout(() => searchRef.current?.focus(), 80)
+  }
+  return <>
+    {mobileOpen && <button aria-label="关闭侧边栏" className="fixed inset-0 z-30 bg-black/50 md:hidden" onClick={onToggle} />}
+    <aside className={`fixed inset-y-0 left-0 z-40 flex flex-col border-r bg-card/95 backdrop-blur transition-[width,transform] duration-200 md:relative md:z-0 ${collapsed ? 'w-[60px]' : 'w-[270px]'} ${mobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
+      <div className={`group relative flex h-14 shrink-0 items-center ${collapsed ? 'justify-center' : 'gap-2 px-3'}`}><button className={`flex size-9 items-center justify-center rounded-lg text-foreground transition hover:bg-accent ${collapsed ? 'group-hover:opacity-0' : ''}`} aria-label="Tuoke API" onClick={collapsed ? onToggle : undefined}><span className="flex size-7 items-center justify-center rounded-lg border border-foreground/20 text-xs font-bold tracking-tight">T</span></button>{!collapsed && <span className="font-semibold tracking-tight">Tuoke API</span>}{collapsed && <button className="absolute inset-0 m-auto hidden size-9 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground group-hover:flex" onClick={onToggle} aria-label="展开侧边栏"><PanelLeftOpen className="size-5" /></button>}{!collapsed && <button className={`${iconButton} ml-auto`} onClick={onToggle} aria-label="收缩侧边栏"><PanelLeftClose className="size-4" /></button>}</div>
+      <div className={`space-y-1 px-2 ${collapsed ? 'flex flex-col items-center' : ''}`}><button onClick={onNew} className={`${iconButton} ${collapsed ? '' : 'flex w-full justify-start gap-2 px-3 text-sm'}`} aria-label="新建聊天"><MessageSquarePlus className="size-[21px]" />{!collapsed && '新建聊天'}</button><button onClick={openSearch} className={`${iconButton} ${collapsed ? '' : 'flex w-full justify-start gap-2 px-3 text-sm'}`} aria-label="搜索聊天"><Search className="size-[21px]" />{!collapsed && '搜索聊天'}</button>{!collapsed && <div className="mt-1 flex items-center gap-2 rounded-xl bg-muted/50 px-3 py-2"><Search className="size-4 text-muted-foreground" /><input ref={searchRef} value={search} onChange={e => setSearch(e.target.value)} placeholder="搜索聊天" className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground" /></div>}</div>
+      {!collapsed && <div className="min-h-0 flex-1 overflow-y-auto px-2 pt-5"><p className="px-3 pb-2 text-xs font-medium text-muted-foreground">最近</p>{filtered.length === 0 ? <p className="px-3 py-4 text-sm text-muted-foreground">暂无聊天记录</p> : filtered.map(c => <div key={c.id} className={`group flex items-center rounded-xl px-3 py-2 text-sm ${activeId === c.id ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/70 hover:text-foreground'}`}><button className="min-w-0 flex-1 truncate text-left" onClick={() => onSelect(c)}>{c.title || '新对话'}</button><DropdownMenu><DropdownMenuTrigger className="invisible ml-2 shrink-0 rounded-md p-1 group-hover:visible hover:bg-background/60" aria-label="聊天菜单"><MoreHorizontal className="size-4" /></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-32"><DropdownMenuItem variant="destructive" onClick={() => onDelete(c)}><Trash2 className="size-4" />删除聊天</DropdownMenuItem></DropdownMenuContent></DropdownMenu></div>)}</div>}
+      <div className={`mt-auto border-t ${collapsed ? 'flex justify-center p-2' : 'p-3'}`}><Link to="/user-center" className={`flex items-center gap-2 rounded-xl text-sm text-muted-foreground hover:bg-accent hover:text-foreground ${collapsed ? 'size-10 justify-center' : 'px-2 py-2'}`}><UserCircle className="size-[22px]" />{!collapsed && '账户中心'}</Link></div>
+    </aside>
+  </>
+}
+
+function MessageList({ messages, bottomRef }: { messages: Message[]; bottomRef: React.RefObject<HTMLDivElement | null> }) {
+  return <div className="mx-auto w-full max-w-4xl space-y-7 px-4 py-8 sm:px-8">{messages.length === 0 ? <div className="flex min-h-[55vh] flex-col items-center justify-center text-center"><div className="mb-4 flex size-14 items-center justify-center rounded-2xl bg-muted"><Bot className="size-7 text-muted-foreground" /></div><h1 className="text-2xl font-semibold">开始一段新对话</h1><p className="mt-2 text-sm text-muted-foreground">选择模型后，输入消息开始测试 Tuoke API。</p></div> : messages.map((m, i) => <div key={`${m.role}-${i}`} className={`flex gap-3 ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}><div className={`max-w-[min(85%,720px)] rounded-2xl px-4 py-3 text-sm leading-6 ${m.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted/70'}`}>{m.role === 'assistant' ? <Markdown>{m.content || ' '}</Markdown> : <p className="whitespace-pre-wrap">{m.content}</p>}{m.meta && <div className="mt-3 border-t border-border/60 pt-2 text-[11px] text-muted-foreground">Tokens {formatNumber(m.meta.total_tokens)} · {m.meta.model ?? 'model'}</div>}</div></div>)}<div ref={bottomRef} /></div>
+}
+
+function LegacyComposer({ input, setInput, model, setModel, models, systemPrompt, setSystemPrompt, sending, onSend }: { input: string; setInput: (v: string) => void; model: string; setModel: (v: string) => void; models: Model[]; systemPrompt: string; setSystemPrompt: (v: string) => void; sending: boolean; onSend: () => void }) {
+  const ref = useRef<HTMLTextAreaElement>(null)
+  useEffect(() => { const el = ref.current; if (el) { el.style.height = 'auto'; el.style.height = `${Math.min(Math.max(el.scrollHeight, 48), 220)}px` } }, [input])
+  return <div className="sticky bottom-0 mx-auto w-full max-w-4xl bg-background px-4 pb-4 pt-2 sm:px-8"><div className="rounded-3xl border bg-card p-2 shadow-lg shadow-black/5"><Textarea ref={ref} value={input} disabled={sending} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); onSend() } }} placeholder="输入消息…（Enter 发送，Shift + Enter 换行）" rows={1} className="max-h-[220px] min-h-12 resize-none overflow-y-auto border-0 bg-transparent px-3 py-2 text-sm shadow-none focus-visible:ring-0" /><div className="flex items-center gap-1 px-1 pt-1"><Popover><PopoverTrigger className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium hover:bg-accent ${systemPrompt ? 'text-primary' : 'text-muted-foreground'}`}><Settings2 className="size-3.5" />系统提示{systemPrompt && ' •'}</PopoverTrigger><PopoverContent align="start" className="w-80"><div className="mb-2 flex items-center justify-between"><span className="text-sm font-medium">系统提示（可选）</span>{systemPrompt && <button className="text-xs text-muted-foreground hover:text-foreground" onClick={() => setSystemPrompt('')}>清空</button>}</div><Textarea autoFocus value={systemPrompt} onChange={e => setSystemPrompt(e.target.value)} placeholder="例如：你是一个简洁、专业的 AI 助手。" className="min-h-24 resize-y" /></PopoverContent></Popover><DropdownMenu><DropdownMenuTrigger className="flex max-w-52 items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent"><span className="truncate">{models.find(m => m.model_id === model)?.display_name ?? '自动'}</span><ChevronDown className="size-3.5 shrink-0" /></DropdownMenuTrigger><DropdownMenuContent align="start" className="max-h-72 w-64">{models.map(m => <DropdownMenuItem key={m.model_id} onClick={() => setModel(m.model_id)} className={m.model_id === model ? 'bg-accent' : ''}>{m.display_name}<span className="ml-auto text-[11px] text-muted-foreground">{m.model_id}</span></DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu><Button className="ml-auto rounded-xl" size="sm" onClick={onSend} disabled={sending || !input.trim() || !model}>{sending ? '生成中…' : '发送'}</Button></div></div></div>
+}
+
+function Composer({ input, setInput, model, setModel, models, systemPrompt, setSystemPrompt, sending, onSend }: Parameters<typeof LegacyComposer>[0]) {
+  const ref = useRef<HTMLTextAreaElement>(null)
+  useEffect(() => { const el = ref.current; if (el) { el.style.height = 'auto'; el.style.height = `${Math.min(Math.max(el.scrollHeight, 48), 220)}px` } }, [input])
+  return <div className="sticky bottom-0 mx-auto w-full max-w-4xl bg-background px-4 pb-4 pt-2 sm:px-8"><div className="relative rounded-3xl border bg-card p-2 shadow-lg shadow-black/5"><Textarea ref={ref} value={input} disabled={sending} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); onSend() } }} placeholder="输入消息..." rows={1} className="max-h-[220px] min-h-12 resize-none overflow-y-auto border-0 bg-transparent px-3 py-2 pr-36 text-sm shadow-none focus-visible:ring-0" /><div className="absolute bottom-2 right-2 flex items-center gap-1"><Popover><PopoverTrigger aria-label="系统提示" className={`relative flex size-8 items-center justify-center rounded-lg hover:bg-accent ${systemPrompt ? 'text-primary' : 'text-muted-foreground'}`}><SlidersHorizontal className="size-4" />{systemPrompt && <span className="absolute right-1 top-1 size-1.5 rounded-full bg-primary" />}</PopoverTrigger><PopoverContent align="end" className="w-80"><Textarea autoFocus value={systemPrompt} onChange={e => setSystemPrompt(e.target.value)} className="min-h-24 resize-y" /></PopoverContent></Popover><DropdownMenu><DropdownMenuTrigger className="flex max-w-32 items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent"><span className="truncate">{models.find(m => m.model_id === model)?.display_name ?? '自动'}</span><ChevronDown className="size-3.5 shrink-0" /></DropdownMenuTrigger><DropdownMenuContent align="end" className="max-h-72 w-64">{models.map(m => <DropdownMenuItem key={m.model_id} onClick={() => setModel(m.model_id)}>{m.display_name}</DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu><Button aria-label="发送" className="size-8 rounded-full p-0" onClick={onSend} disabled={sending || !input.trim() || !model}><ArrowUp className="size-4" /></Button></div></div></div>
 }
 
 export default function PlaygroundPage() {
-  const { t } = useI18n()
-  const [messages, setMessages] = useState<ChatMessage[]>([])
-  // Optional system prompt for this Playground session. Client-side only:
-  // when set, it's prepended as a `system` message to the request. Persisted
-  // to localStorage so it survives reloads.
-  const [systemPrompt, setSystemPrompt] = useState<string>(
-    () => localStorage.getItem('playground.systemPrompt') ?? '',
-  )
-  const [systemPromptOpen, setSystemPromptOpen] = useState<boolean>(
-    () => !!localStorage.getItem('playground.systemPrompt'),
-  )
-  const updateSystemPrompt = (v: string) => {
-    setSystemPrompt(v)
-    localStorage.setItem('playground.systemPrompt', v)
-  }
-  const [input, setInput] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [selectedModel, setSelectedModel] = useState<string>(
-    () => localStorage.getItem('playground.model') ?? 'auto',
-  )
-  const messagesEndRef = useRef<HTMLDivElement>(null)
-  const inputRef = useRef<HTMLTextAreaElement>(null)
-
-  const { data: keyData } = useQuery<{ apiKey: string }>({
-    queryKey: ['unified-key'],
-    queryFn: () => apiFetch('/api/settings/api-key'),
-  })
-
-  const { data: fallbackEntries = [] } = useQuery<FallbackEntry[]>({
-    queryKey: ['fallback'],
-    queryFn: () => apiFetch('/api/fallback'),
-  })
-
-  // Unification is always on now (the on/off toggle was removed), so the picker
-  // always collapses a model's providers into one option.
-  const unifyOn = true
-
-  const availableModels = fallbackEntries.filter(e => e.keyCount > 0 && e.enabled)
-  // Collapse the same model from multiple providers into one option (value =
-  // canonical id, which the proxy resolves to the whole group).
-  const modelOptions = buildModelOptions(availableModels, unifyOn)
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
-
-  // Read a fusion SSE stream, updating the assistant message in place as panel
-  // answers + the judge arrive (additive `_fusion` frames) and the final answer
-  // streams as content deltas.
-  const streamFusion = async (stream: ReadableStream<Uint8Array>, baseMessages: ChatMessage[], start: number) => {
-    const reader = stream.getReader()
-    const dec = new TextDecoder()
-    let buf = ''
-    let finalContent = ''
-    const panel: FusionPanelEntry[] = []
-    let judge: { platform: string; model: string } | null = null
-
-    const flush = (streaming: boolean) => {
-      setMessages([...baseMessages, {
-        role: 'assistant',
-        content: finalContent,
-        meta: { latency: Date.now() - start, fusionPanel: [...panel], fusionJudge: judge, fusionStreaming: streaming },
-      }])
-    }
-    flush(true)
-
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buf += dec.decode(value, { stream: true })
-      const lines = buf.split('\n')
-      buf = lines.pop() ?? ''
-      for (const line of lines) {
-        const tl = line.trim()
-        if (!tl.startsWith('data:')) continue
-        const d = tl.slice(5).trim()
-        if (d === '[DONE]') continue
-        let obj: any
-        try { obj = JSON.parse(d) } catch { continue }
-        if (obj._fusion) {
-          if (obj._fusion.event === 'panel') {
-            panel.push({ platform: obj._fusion.platform, model: obj._fusion.model, status: obj._fusion.status, content: obj._fusion.content, error: obj._fusion.error })
-          } else if (obj._fusion.event === 'judge') {
-            judge = { platform: obj._fusion.platform, model: obj._fusion.model }
-          }
-          flush(true)
-        } else if (obj.error) {
-          finalContent = `${t('playground.errorPrefix')} ${obj.error.message}`
-          flush(true)
-        } else if (obj.choices) {
-          const delta = obj.choices[0]?.delta?.content
-          if (delta) { finalContent += delta; flush(true) }
-        }
-      }
-    }
-    flush(false)
-  }
-
-  const handleSend = async () => {
-    const text = input.trim()
-    if (!text || loading) return
-
-    const userMsg: ChatMessage = { role: 'user', content: text }
-    const newMessages = [...messages, userMsg]
-    setMessages(newMessages)
-    setInput('')
-    setLoading(true)
-    inputRef.current?.focus()
-
-    try {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-      if (keyData?.apiKey) headers['Authorization'] = `Bearer ${keyData.apiKey}`
-
-      const isFusion = selectedModel === 'fusion'
-      const sysPrompt = systemPrompt.trim()
-      const body: any = {
-        messages: [
-          ...(sysPrompt ? [{ role: 'system', content: sysPrompt }] : []),
-          ...newMessages.map(m => ({ role: m.role, content: m.content })),
-        ],
-      }
-      if (selectedModel !== 'auto') body.model = selectedModel
-      // Fusion streams its panel + judge trace; ask for a stream so the
-      // Playground can show the other models arriving before the final answer.
-      if (isFusion) body.stream = true
-
-      const base = import.meta.env.BASE_URL.replace(/\/$/, '')
-      const start = Date.now()
-      const res = await fetch(`${base}/v1/chat/completions`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(body),
-      })
-
-      const latency = Date.now() - start
-      const routedVia = res.headers.get('X-Routed-Via')
-      const fallbackAttempts = res.headers.get('X-Fallback-Attempts')
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: { message: `HTTP ${res.status}` } }))
-        setMessages([...newMessages, {
-          role: 'assistant',
-          isError: true,
-          content: err.error?.message ?? t('common.unknownError'),
-        }])
-        return
-      }
-
-      if (isFusion && res.body) {
-        await streamFusion(res.body, newMessages, start)
-        return
-      }
-
-      const data = await res.json()
-      const content = data.choices?.[0]?.message?.content ?? JSON.stringify(data, null, 2)
-      const via = data._routed_via ?? (routedVia ? {
-        platform: routedVia.split('/')[0],
-        model: routedVia.split('/').slice(1).join('/'),
-      } : undefined)
-
-      // Fusion responses carry a structured routing summary so we can show the
-      // panel models that replied + the judge, rather than parsing the compact
-      // X-Routed-Via string.
-      const fusion = data._fusion as
-        | { panel: { platform: string; model: string }[]; judge: { platform: string; model: string } | null }
-        | undefined
-
-      setMessages([...newMessages, {
-        role: 'assistant',
-        content,
-        meta: {
-          platform: via?.platform,
-          model: via?.model,
-          latency,
-          fallbackAttempts: fallbackAttempts ? parseInt(fallbackAttempts) : undefined,
-          fusionPanel: fusion?.panel,
-          fusionJudge: fusion?.judge,
-        },
-      }])
-    } catch (err: any) {
-      setMessages([...newMessages, {
-        role: 'assistant',
-        isError: true,
-        content: err.message,
-      }])
-    } finally {
-      setLoading(false)
-      setTimeout(() => inputRef.current?.focus(), 0)
-    }
-  }
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      handleSend()
-    }
-  }
-
-  const handleClear = () => {
-    setMessages([])
-    inputRef.current?.focus()
-  }
-
-  // Searchable picker options: auto + fusion pinned at the top, then every model
-  // ordered BY INTELLIGENCE — size tier first (Frontier→Small), then the catalog
-  // rank within the tier, name as the final tiebreaker. (Raw intelligence_rank is
-  // per-provider, not global, so tier-first matches the server's preset; #135.)
-  const pickerOptions = [
-    { value: 'auto', label: t('playground.autoModel'), sub: '', isNew: false, platforms: [] as string[] },
-    { value: 'fusion', label: t('playground.fusionModel'), sub: '', isNew: true, platforms: [] as string[] },
-    ...modelOptions
-      .slice()
-      .sort((a, b) =>
-        a.sizeTier - b.sizeTier ||
-        a.intelligenceRank - b.intelligenceRank ||
-        a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }))
-      .map(o => ({
-        value: o.value,
-        label: o.label,
-        sub: o.providerCount > 1 ? t('models.providerCount', { count: o.providerCount }) : o.platform,
-        isNew: false,
-        // Provider names for the multi-provider hover + search; empty when solo.
-        platforms: o.providerCount > 1 ? o.platforms : [],
-      })),
-  ]
-  function pickModel(v: string) {
-    setSelectedModel(v)
-    localStorage.setItem('playground.model', v)
-  }
-
-  const activeModelLabel = selectedModel === 'auto'
-    ? t('playground.autoModel')
-    : selectedModel === 'fusion'
-    ? t('playground.fusionModel')
-    : modelOptions.find(o => o.value === selectedModel)?.label ?? selectedModel
-
-  return (
-    <div className="flex flex-col h-[calc(100vh-8rem)]">
-      <PageHeader
-        title={t('playground.title')}
-        description={t('playground.description')}
-        actions={
-          <>
-            <ModelCombobox
-              value={selectedModel}
-              options={pickerOptions}
-              onSelect={pickModel}
-              ariaLabel={t('playground.selectModel')}
-              placeholder={t('playground.searchModels')}
-              emptyText={t('playground.noModelsFound')}
-              footer={
-                availableModels.length === 0 ? (
-                  // Models only appear once a platform has an enabled key. Without
-                  // one, the list is just Auto/Fusion and looks broken — say why. (#269)
-                  <div className="px-2 py-1.5 text-xs text-muted-foreground">{t('playground.noModels')}</div>
-                ) : undefined
-              }
-            />
-            {messages.length > 0 && (
-              <Button variant="outline" size="sm" onClick={handleClear}>
-                {t('playground.clear')}
-              </Button>
-            )}
-          </>
-        }
-      />
-
-      <div className="flex-1 flex flex-col rounded-3xl border bg-card overflow-hidden min-h-0">
-        <div className="flex-1 overflow-y-auto p-6 space-y-4">
-          {messages.length === 0 ? (
-            <div className="flex items-center justify-center h-full text-center">
-              <div className="space-y-2 max-w-sm">
-                <p className="text-base font-medium">{t('playground.emptyTitle')}</p>
-                <p className="text-sm text-muted-foreground">
-                  {t('playground.emptyDescription', { model: activeModelLabel })}
-                </p>
-              </div>
-            </div>
-          ) : (
-            <>
-              {messages.map((msg, i) => {
-                const fusionPanel = msg.meta?.fusionPanel
-                const okPanel = fusionPanel?.filter(p => p.status !== 'failed') ?? []
-                // Skip an empty assistant bubble while the fusion trace is still
-                // streaming in (no final answer yet) — the trace shows below.
-                const showBubble = msg.role === 'user' || msg.content.length > 0
-                return (
-                  <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`flex flex-col gap-1 max-w-[80%] ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-                      {showBubble && (
-                        <div
-                          className={`group relative rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
-                            msg.role === 'user'
-                              ? 'bg-primary text-primary-foreground'
-                              : msg.isError
-                                ? 'border border-destructive/25 bg-destructive/10 text-destructive'
-                                : 'bg-muted'
-                          }`}
-                        >
-                          {msg.isError ? (
-                            <div className="flex items-start gap-2">
-                              <CircleAlert className="mt-0.5 size-4 shrink-0" />
-                              <div className="min-w-0">
-                                <p className="font-medium">{t('playground.errorTitle')}</p>
-                                <p className="whitespace-pre-wrap break-words">{msg.content}</p>
-                              </div>
-                            </div>
-                          ) : msg.role === 'assistant' ? (
-                            <Markdown>{msg.content}</Markdown>
-                          ) : (
-                            <div className="whitespace-pre-wrap">{msg.content}</div>
-                          )}
-                          {msg.role === 'assistant' && !msg.isError && msg.content && (
-                            <CopyButton
-                              text={msg.content}
-                              label={t('playground.copyReply')}
-                              className="absolute right-1.5 top-1.5 size-6 opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100"
-                            />
-                          )}
-                          {msg.meta && (
-                            <div className="flex items-center gap-2 mt-2 flex-wrap text-[11px] opacity-70 tabular-nums">
-                              {(fusionPanel || msg.meta.fusionStreaming) ? (
-                                <>
-                                  {okPanel.length > 0 && (
-                                    <span>
-                                      {t('playground.fusionPanel')}:{' '}
-                                      <span className="font-mono">{okPanel.map(fusionRouteLabel).join(', ')}</span>
-                                    </span>
-                                  )}
-                                  {msg.meta.fusionJudge && (
-                                    <span>
-                                      · {t('playground.fusionJudge')}:{' '}
-                                      <span className="font-mono">{fusionRouteLabel(msg.meta.fusionJudge)}</span>
-                                    </span>
-                                  )}
-                                  {msg.meta.latency != null && <span>· {msg.meta.latency} ms</span>}
-                                </>
-                              ) : (
-                                <>
-                                  {msg.meta.platform && <span>{msg.meta.platform}</span>}
-                                  {msg.meta.model && <span className="font-mono">· {msg.meta.model}</span>}
-                                  {msg.meta.latency != null && <span>· {msg.meta.latency} ms</span>}
-                                  {msg.meta.fallbackAttempts != null && msg.meta.fallbackAttempts > 0 && (
-                                    <span>· {msg.meta.fallbackAttempts} {msg.meta.fallbackAttempts > 1 ? t('playground.fallbacks') : t('playground.fallback')}</span>
-                                  )}
-                                </>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                      {msg.role === 'assistant' && fusionPanel && fusionPanel.length > 0 && (
-                        <FusionTrace
-                          panel={fusionPanel}
-                          judge={msg.meta?.fusionJudge}
-                          streaming={msg.meta?.fusionStreaming}
-                          answerStarted={msg.content.length > 0}
-                        />
-                      )}
-                    </div>
-                  </div>
-                )
-              })}
-              {loading && !messages[messages.length - 1]?.meta?.fusionStreaming && (
-                <div className="flex justify-start">
-                  <div className="bg-muted rounded-2xl px-4 py-3">
-                    <div className="flex gap-1">
-                      <span className="size-1.5 rounded-full bg-muted-foreground/50 animate-bounce" style={{ animationDelay: '0ms' }} />
-                      <span className="size-1.5 rounded-full bg-muted-foreground/50 animate-bounce" style={{ animationDelay: '150ms' }} />
-                      <span className="size-1.5 rounded-full bg-muted-foreground/50 animate-bounce" style={{ animationDelay: '300ms' }} />
-                    </div>
-                  </div>
-                </div>
-              )}
-              <div ref={messagesEndRef} />
-            </>
-          )}
-        </div>
-
-        <div className="border-t bg-background/50 p-3">
-          <div className="mb-2">
-            <button
-              type="button"
-              onClick={() => setSystemPromptOpen(o => !o)}
-              className="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
-            >
-              <ChevronRight className={`size-3.5 transition-transform ${systemPromptOpen ? 'rotate-90' : ''}`} />
-              {t('playground.systemPromptLabel')}
-              {systemPrompt.trim() && <span className="ml-1 size-1.5 rounded-full bg-primary/70" />}
-            </button>
-            {systemPromptOpen && (
-              <textarea
-                value={systemPrompt}
-                onChange={e => updateSystemPrompt(e.target.value)}
-                placeholder={t('playground.systemPromptPlaceholder')}
-                rows={2}
-                className="mt-1.5 w-full resize-y rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/50 min-h-[44px] max-h-[160px]"
-              />
-            )}
-          </div>
-          <div className="flex gap-2 items-end">
-            <textarea
-              ref={inputRef}
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder={t('playground.inputPlaceholder')}
-              rows={1}
-              className="flex-1 resize-none rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/50 min-h-[40px] max-h-[160px]"
-              style={{ height: 'auto', overflow: 'hidden' }}
-              onInput={e => {
-                const el = e.target as HTMLTextAreaElement
-                el.style.height = 'auto'
-                el.style.height = Math.min(el.scrollHeight, 160) + 'px'
-              }}
-            />
-            <Button onClick={handleSend} disabled={loading || !input.trim()} size="default">
-              {loading ? t('playground.sending') : t('playground.send')}
-            </Button>
-          </div>
-        </div>
-      </div>
-    </div>
-  )
+  const [searchParams] = useSearchParams(); const [model, setModel] = useState('auto'); const [systemPrompt, setSystemPrompt] = useState(''); const [input, setInput] = useState(''); const [messages, setMessages] = useState<Message[]>([]); const [error, setError] = useState(''); const [sending, setSending] = useState(false); const [conversationId, setConversationId] = useState<number | null>(null); const [collapsed, setCollapsed] = useState(() => localStorage.getItem('playground-sidebar') === 'collapsed'); const [mobileOpen, setMobileOpen] = useState(false); const [loadingConversation, setLoadingConversation] = useState(false); const bottomRef = useRef<HTMLDivElement>(null); const requestRef = useRef(0)
+  const queryClient = useQueryClient()
+  const models = useQuery<{ models: Model[] }>({ queryKey: ['user-models'], queryFn: () => apiFetch('/api/user/models') }); const conversations = useQuery<{ conversations: Conversation[] }>({ queryKey: ['playground-conversations'], queryFn: () => apiFetch('/api/user/playground/conversations') }); const conversationMessages = useQuery<{ messages: ConversationMessage[] }>({ queryKey: ['playground-conversation-messages', conversationId], queryFn: () => apiFetch(`/api/user/playground/conversations/${conversationId}/messages`), enabled: conversationId !== null }); const usableModels = useMemo(() => models.data?.models ?? [], [models.data?.models])
+  useEffect(() => { const requested = searchParams.get('model'); if (requested && usableModels.some(m => m.model_id === requested)) setModel(requested); else if (usableModels.length && !usableModels.some(m => m.model_id === model)) setModel('auto') }, [searchParams, usableModels, model])
+  useEffect(() => { if (!conversationMessages.data || conversationId === null || sending) return; setMessages(conversationMessages.data.messages.map(m => ({ role: m.role, content: m.content, meta: m.role === 'assistant' ? { model: m.model, prompt_tokens: m.promptTokens, completion_tokens: m.completionTokens, total_tokens: m.totalTokens, cost_micro: m.costMicro } : undefined }))) }, [conversationMessages.data, conversationId, sending])
+  useEffect(() => { if (messages.length && !loadingConversation) bottomRef.current?.scrollIntoView({ behavior: sending ? 'smooth' : 'auto' }) }, [messages, loadingConversation, sending])
+  const reset = useCallback(() => { requestRef.current++; setConversationId(null); setMessages([]); setSystemPrompt(''); setInput(''); setError(''); setMobileOpen(false) }, [])
+  async function selectConversation(c: Conversation) { if (sending) return; setLoadingConversation(true); setConversationId(c.id); setModel(c.modelId); setSystemPrompt(c.systemPrompt ?? ''); setError(''); setMobileOpen(false); await conversationMessages.refetch(); setLoadingConversation(false) }
+  async function removeConversation(c: Conversation) { if (!window.confirm('确定删除这条聊天记录吗？')) return; try { await apiFetch(`/api/user/playground/conversations/${c.id}`, { method: 'DELETE' }); if (conversationId === c.id) reset(); await conversations.refetch() } catch (e) { setError((e as Error).message) } }
+  async function send() { const text = input.trim(); if (!text || !model || sending) return; const requestId = ++requestRef.current; const next = [...messages, { role: 'user' as const, content: text }]; setMessages([...next, { role: 'assistant', content: '' }]); setInput(''); setError(''); setSending(true); try { let active = conversationId; if (active === null) { const created = await apiFetch<{ id: number }>('/api/user/playground/conversations', { method: 'POST', body: JSON.stringify({ model, systemPrompt }) }); active = created.id; setConversationId(active) } await apiFetch(`/api/user/playground/conversations/${active}/messages`, { method: 'POST', body: JSON.stringify({ role: 'user', content: text }) }); const token = getToken(); const response = await fetch('/api/user/playground/chat/stream', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify({ model, messages: [...(systemPrompt.trim() ? [{ role: 'system', content: systemPrompt.trim() }] : []), ...next] }) }); if (!response.ok) throw new Error((await response.json().catch(() => null))?.error?.message ?? `HTTP ${response.status}`); if (!response.body) throw new Error('Streaming response body is empty'); const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = ''; let assistantText = ''; while (true) { const { done, value } = await reader.read(); if (done) break; buffer += decoder.decode(value, { stream: true }); const parts = buffer.split('\n\n'); buffer = parts.pop() ?? ''; for (const part of parts) for (const line of part.split('\n')) { if (!line.startsWith('data:')) continue; const data = line.slice(5).trim(); if (!data || data === '[DONE]') continue; const chunk = JSON.parse(data); if (chunk.error) throw new Error(chunk.error.message ?? 'Streaming error'); const content = chunk.choices?.[0]?.delta?.content; if (typeof content === 'string') { assistantText += content; if (requestRef.current === requestId) setMessages([...next, { role: 'assistant', content: assistantText }]) } } } if (assistantText.trim()) await apiFetch(`/api/user/playground/conversations/${active}/messages`, { method: 'POST', body: JSON.stringify({ role: 'assistant', content: assistantText }) }); await queryClient.refetchQueries({ queryKey: ['playground-conversation-messages', active] }); await conversations.refetch() } catch (e) { if (requestRef.current === requestId) setError((e as Error).message) } finally { if (requestRef.current === requestId) setSending(false) } }
+  return <div className="-mx-6 -my-8 flex h-[calc(100vh-65px)] min-h-[620px] overflow-hidden bg-background"><PlaygroundSidebar conversations={conversations.data?.conversations ?? []} activeId={conversationId} collapsed={collapsed} mobileOpen={mobileOpen} onToggle={() => { const next = !collapsed; setCollapsed(next); localStorage.setItem('playground-sidebar', next ? 'collapsed' : 'expanded'); setMobileOpen(false) }} onNew={reset} onSelect={selectConversation} onDelete={removeConversation} /><main className="flex min-w-0 flex-1 flex-col"><header className="flex h-14 shrink-0 items-center border-b px-4 sm:px-8"><button className={`${iconButton} mr-2 md:hidden`} onClick={() => setMobileOpen(true)} aria-label="打开侧边栏"><Menu className="size-5" /></button><div className="flex items-center gap-2 text-sm font-medium">{usableModels.find(m => m.model_id === model)?.display_name ?? '自动'}<span className="text-xs text-muted-foreground">· Playground</span></div><button className={`${iconButton} ml-auto md:hidden`} onClick={() => setMobileOpen(false)}><X className="size-4" /></button></header><div className="min-h-0 flex-1 overflow-y-auto">{loadingConversation ? <p className="py-20 text-center text-sm text-muted-foreground">正在加载聊天…</p> : <MessageList messages={messages} bottomRef={bottomRef} />}</div>{error && <p className="mx-auto mb-2 w-full max-w-4xl px-4 text-sm text-destructive sm:px-8">{error}</p>}<Composer input={input} setInput={setInput} model={model} setModel={setModel} models={usableModels} systemPrompt={systemPrompt} setSystemPrompt={setSystemPrompt} sending={sending} onSend={() => void send()} /></main></div>
 }

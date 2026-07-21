@@ -1,7 +1,10 @@
 import type { Db } from '../types.js';
 
 export function up(db: Db): void {
-  db.exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('admin', 'user'))");
+  const columns = db.prepare('PRAGMA table_info(users)').all() as { name: string }[];
+  if (!columns.some((column) => column.name === 'role')) {
+    db.exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('admin', 'user'))");
+  }
   db.prepare("UPDATE users SET role = 'admin'").run();
 }
 

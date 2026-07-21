@@ -95,21 +95,31 @@ export function CommandPalette() {
     queryFn: () => apiFetch('/api/settings/api-key'),
     enabled: open,
   })
+  const { data: authStatus } = useQuery<{ role: 'admin' | 'user' | null }>({ queryKey: ['auth-status'] })
 
   const commands = useMemo<Command[]>(() => {
     const go = (to: string) => () => navigate(to)
+    const modelPage = (adminPath: string, category: string) => authStatus?.role === 'user' ? `/user-models?category=${category}` : adminPath
     const pages: Command[] = [
       { id: 'p-chat', group: 'pages', label: t('models.chatModelsTab'), keywords: 'models chat routing fallback', icon: MessageSquare, run: go('/models/chat') },
-      { id: 'p-embeddings', group: 'pages', label: t('models.embeddingsTab'), keywords: 'models embeddings vectors', icon: Layers, run: go('/models/embeddings') },
-      { id: 'p-image', group: 'pages', label: t('models.imageTab'), keywords: 'models image generation', icon: ImageIcon, run: go('/models/image') },
-      { id: 'p-audio', group: 'pages', label: t('models.audioTab'), keywords: 'models audio speech tts', icon: AudioLines, run: go('/models/audio') },
-      { id: 'p-fusion', group: 'pages', label: t('models.fusionTab'), keywords: 'models fusion synthesis panel judge', icon: Zap, run: go('/models/fusion') },
+      { id: 'p-embeddings', group: 'pages', label: t('models.embeddingsTab'), keywords: 'models embeddings vectors', icon: Layers, run: go(modelPage('/models/embeddings', 'embedding')) },
+      { id: 'p-image', group: 'pages', label: t('models.imageTab'), keywords: 'models image generation', icon: ImageIcon, run: go(modelPage('/models/image', 'image')) },
+      { id: 'p-audio', group: 'pages', label: t('models.audioTab'), keywords: 'models audio speech tts', icon: AudioLines, run: go(modelPage('/models/audio', 'audio')) },
+      { id: 'p-fusion', group: 'pages', label: t('models.fusionTab'), keywords: 'models fusion synthesis panel judge', icon: Zap, run: go(modelPage('/models/fusion', 'fusion')) },
       { id: 'p-playground', group: 'pages', label: t('nav.playground'), keywords: 'playground test chat try', icon: SquareTerminal, run: go('/playground') },
       { id: 'p-keys', group: 'pages', label: t('nav.keys'), keywords: 'keys providers api tokens', icon: KeyRound, run: go('/keys') },
       { id: 'p-analytics', group: 'pages', label: t('nav.analytics'), keywords: 'analytics usage stats savings latency', icon: ChartColumn, run: go('/analytics') },
       { id: 'p-premium', group: 'pages', label: t('nav.premium'), keywords: 'premium catalog license subscription', icon: Sparkles, run: go('/premium') },
     ]
     const actions: Command[] = [
+      {
+        id: 'a-account-settings',
+        group: 'actions',
+        label: '账户设置',
+        keywords: 'account settings password forgot reset',
+        icon: KeyRound,
+        run: go('/account-settings'),
+      },
       {
         id: 'a-theme',
         group: 'actions',
@@ -165,7 +175,7 @@ export function CommandPalette() {
       })
     }
     return [...pages, ...actions, ...models]
-  }, [entries, keyData, navigate, t])
+  }, [authStatus?.role, entries, keyData, navigate, t])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()

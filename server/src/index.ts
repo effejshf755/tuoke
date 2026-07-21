@@ -13,6 +13,7 @@ import { restoreDbBackupIfNeeded, startDbBackupPump } from './lib/db-backup.js';
 import { userCount } from './services/auth.js';
 import { generateSetupCode } from './lib/setup-code.js';
 import { warnOnEnvDrift } from './lib/env-drift.js';
+import { startPlaygroundCleanup } from './services/playground-cleanup.js';
 
 async function main() {
   const config = loadConfig();
@@ -55,7 +56,7 @@ async function main() {
     startHealthChecker(scheduler);
     startCatalogSync(scheduler);
     startDbBackupPump(getDb(), scheduler, config.dbPath ?? undefined);
-
+startPlaygroundCleanup(scheduler);
     // Post-sleep recovery: while the host was suspended (laptop lid, VM
     // pause) timers and keep-alive sockets froze, so the first requests after
     // wake used to hit dead pooled connections and pre-sleep key statuses

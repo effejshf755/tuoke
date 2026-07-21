@@ -20,7 +20,7 @@ import { extractApiToken, timingSafeStringEqual, getStickyModel, setStickyModel 
 import { runFallbackLoop, newFallbackState, recordUpstreamSuccess, type ExhaustionBody, setFallbackHeaders, type AttemptRecord } from '../lib/fallback-loop.js';
 import { applyTokenBudget, tokenBudgetMessage } from '../lib/guardrails.js';
 import { resolveAnthropicModel } from '../services/anthropic-map.js';
-import { buildModelListing } from '../services/model-listing.js';
+import { buildModelListing, filterModelListingForConsumer } from '../services/model-listing.js';
 
 // Anthropic-compatible Messages API (`POST /v1/messages`). This is a thin
 // translation layer over the SAME router/fallback/analytics machinery the
@@ -813,7 +813,10 @@ anthropicRouter.get('/models', (req: Request, res: Response, next: NextFunction)
   if (!req.headers['anthropic-version']) return next(); // OpenAI client → proxyRouter
   if (!authenticate(req, res)) return;
 
-  const { models } = buildModelListing();
+  const token = extractApiToken(req);
+  const { models } = token?.startsWith('tuoke-')
+    ? filterModelListingForConsumer(buildModelListing())
+    : buildModelListing();
   const data = [
     { type: 'model' as const, id: 'auto', display_name: 'Auto (router picks the best available model)', created_at: MODEL_CREATED_AT },
     ...models
