@@ -6,12 +6,15 @@ import { z } from 'zod';
 
 import { getDb } from '../db/index.js';
 import { getSetting } from '../db/index.js';
+import { createPagePayment, isAlipayConfigured, settleAlipayOrder, verifyNotify } from '../services/alipay.js';
 
 export const userRechargeRouter =
   Router();
 
 export const adminRechargeRouter =
   Router();
+
+export const alipayNotifyRouter = Router();
 
 const createOrderSchema =
   z.object({
@@ -100,6 +103,27 @@ function createOrderNo(): string {
   return `R${Date.now()}${random}`;
 }
 
+function expireRechargeOrders(): void {
+  getDb().prepare("UPDATE recharge_orders SET status='expired', updated_at=datetime('now') WHERE status='pending' AND expires_at IS NOT NULL AND expires_at <= datetime('now')").run();
+}
+
+/** Alipay asynchronous notification. This endpoint must remain unauthenticated. */
+alipayNotifyRouter.post('/', (req, res) => {
+  const params = Object.fromEntries(Object.entries(req.body ?? {}).map(([key, value]) => [key, Array.isArray(value) ? String(value[0]) : String(value ?? '')]));
+  if (!verifyNotify(params)) { res.status(400).send('fail'); return; }
+  if (params.trade_status !== 'TRADE_SUCCESS' && params.trade_status !== 'TRADE_FINISHED') { res.send('success'); return; }
+  const order = getDb().prepare('SELECT amount_micro amountMicro FROM recharge_orders WHERE order_no=?').get(params.out_trade_no) as { amountMicro:number } | undefined;
+  const paidYuan = Number(params.total_amount);
+  if (!order || !Number.isFinite(paidYuan) || Math.round(paidYuan * 1_000_000) !== order.amountMicro) { res.status(400).send('fail'); return; }
+  try {
+    settleAlipayOrder(getDb(), params.out_trade_no, params.trade_no, 'Alipay asynchronous notification');
+    res.send('success');
+  } catch (error) {
+    console.error('[Alipay] notification settlement failed:', error);
+    res.status(500).send('fail');
+  }
+});
+
 /*
  * ==========================================================
  * USER
@@ -114,6 +138,7 @@ function createOrderNo(): string {
 userRechargeRouter.post(
   '/orders',
   (req, res) => {
+    expireRechargeOrders();
     const parsed =
       createOrderSchema.safeParse(
         req.body,
@@ -213,6 +238,19 @@ userRechargeRouter.post(
   },
 );
 
+/** Create an Alipay page-payment form for an existing order. */
+userRechargeRouter.post('/orders/:id/alipay', (req, res) => {
+  if (!isAlipayConfigured()) { res.status(503).json({ error: { message: 'Alipay is not configured', type: 'payment_unavailable' } }); return; }
+  const orderId = Number(req.params.id);
+  const userId = getUserId(req);
+  const order = getDb().prepare("SELECT id, order_no orderNo, amount_micro amountMicro, status FROM recharge_orders WHERE id=? AND user_id=?").get(orderId, userId) as { id:number; orderNo:string; amountMicro:number; status:string } | undefined;
+  if (!order) { res.status(404).json({ error: { message: 'Recharge order not found', type: 'not_found' } }); return; }
+  if (order.status !== 'pending') { res.status(409).json({ error: { message: `Order is ${order.status}`, type: 'invalid_order_state' } }); return; }
+  const payment = createPagePayment(order.orderNo, order.amountMicro, `FreeLLMAPI 充值 ${order.orderNo}`);
+  getDb().prepare("UPDATE recharge_orders SET payment_provider='alipay', payment_method='alipay_page', updated_at=datetime('now') WHERE id=?").run(order.id);
+  res.json({ order_no: order.orderNo, mode: 'page', gateway: payment.gateway, params: payment.params, form_action: payment.gateway });
+});
+
 /**
  * GET /api/user/recharge/orders
  *
@@ -221,6 +259,7 @@ userRechargeRouter.post(
 userRechargeRouter.get(
   '/orders',
   (req, res) => {
+    expireRechargeOrders();
     const userId =
       getUserId(req);
 
@@ -435,6 +474,7 @@ userRechargeRouter.post(
 adminRechargeRouter.get(
   '/orders',
   (req, res) => {
+    expireRechargeOrders();
     const q =
       typeof req.query.q ===
       'string'

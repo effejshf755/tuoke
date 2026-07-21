@@ -349,7 +349,7 @@ export default function AdminBillingPage() {
   return (
     <div className="max-w-[1700px]">
       <h1 className="text-xl font-semibold">
-        Model Billing
+        模型计费
       </h1>
 
       <p className="mt-1 text-sm text-muted-foreground">
@@ -371,7 +371,7 @@ export default function AdminBillingPage() {
 
         <div className="rounded-2xl border bg-card p-4">
           <div className="text-xs text-muted-foreground">
-            Billing enabled
+            已启用计费
           </div>
 
           <div className="mt-1 text-2xl font-semibold">
@@ -402,7 +402,7 @@ export default function AdminBillingPage() {
               event.target.value,
             )
           }
-          placeholder="Search model, model ID or provider..."
+          placeholder="搜索模型、模型 ID 或提供商..."
           className="max-w-lg"
         />
 
@@ -417,9 +417,9 @@ export default function AdminBillingPage() {
           aria-label="Billing model filter"
         >
           <option value="all">All models</option>
-          <option value="configured">Billing configured</option>
-          <option value="enabled">Billing enabled</option>
-          <option value="disabled">Billing disabled</option>
+          <option value="configured">已配置计费</option>
+          <option value="enabled">已启用计费</option>
+          <option value="disabled">已停用计费</option>
           <option value="unconfigured">Not configured</option>
         </select>
 
@@ -723,7 +723,7 @@ export default function AdminBillingPage() {
                     >
                       {saveBilling.isPending
                         ? 'Saving...'
-                        : 'Save'}
+                        : '保存'}
                     </Button>
                   </td>
                 </tr>
@@ -748,7 +748,7 @@ export default function AdminBillingPage() {
 
       {modelsQuery.isLoading && (
         <p className="mt-4 text-sm text-muted-foreground">
-          Loading models...
+          模型加载中...
         </p>
       )}
 
@@ -759,8 +759,8 @@ export default function AdminBillingPage() {
 
         <div className="mt-2 text-muted-foreground">
           Charge = (
-          Input Tokens × Input Price
-          + Output Tokens × Output Price
+          输入 Token × 输入价格
+          + 输出 Token × 输出价格
           ) ÷ 1,000,000 × Multiplier
         </div>
       </div>

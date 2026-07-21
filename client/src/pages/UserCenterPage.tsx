@@ -10,7 +10,6 @@ import { apiFetch } from '@/lib/api'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import UserWalletPanel from '@/components/UserWalletPanel'
 import UserRequestHistory from '@/components/UserRequestHistory'
 
 type Expiration =
@@ -141,9 +140,7 @@ export default function UserCenterPage() {
 
   const usage = useQuery<Usage>({
     queryKey: ['user-usage'],
-
-    queryFn: () =>
-      apiFetch('/api/user/usage'),
+    queryFn: () => apiFetch('/api/user/usage'),
   })
 
   const authStatus = useQuery<AuthStatus>({
@@ -374,9 +371,9 @@ export default function UserCenterPage() {
           </div>
           <div className="rounded-2xl border p-4">
             <div className="text-xs text-muted-foreground">Token 使用量</div>
-            <div className="mt-2 text-sm font-semibold">Input {formatNumber(usage.data?.prompt_tokens ?? 0)}</div>
-            <div className="mt-1 text-sm font-semibold">Output {formatNumber(usage.data?.completion_tokens ?? 0)}</div>
-            <div className="mt-1 text-xs text-muted-foreground">Total {formatNumber(usage.data?.total_tokens ?? 0)}</div>
+            <div className="mt-2 text-sm font-semibold">输入 {formatNumber(usage.data?.prompt_tokens ?? 0)}</div>
+            <div className="mt-1 text-sm font-semibold">输出 {formatNumber(usage.data?.completion_tokens ?? 0)}</div>
+            <div className="mt-1 text-xs text-muted-foreground">总计 {formatNumber(usage.data?.total_tokens ?? 0)}</div>
           </div>
           <div className="rounded-2xl border p-4">
             <div className="text-xs text-muted-foreground">API Key 数量</div>
@@ -404,11 +401,10 @@ export default function UserCenterPage() {
       {/* ======================================================
           使用情况
       ====================================================== */}
-      <UserWalletPanel />
       <UserRequestHistory />
 
 
-      <div id="api-keys" className="mt-6 rounded-3xl border bg-card p-6">
+      {false && <div id="api-keys" className="mt-6 rounded-3xl border bg-card p-6">
         <h2 className="font-medium">
           Usage
         </h2>
@@ -467,7 +463,7 @@ export default function UserCenterPage() {
           </div>
         </div>
 
-      </div>
+      </div>}
 
       {/* ======================================================
           API Keys
@@ -735,7 +731,7 @@ export default function UserCenterPage() {
 
                     <div>
                       <div className="text-xs text-muted-foreground">
-                        Input Tokens
+                        输入 Token
                       </div>
 
                       <div className="mt-1 font-medium">
@@ -747,7 +743,7 @@ export default function UserCenterPage() {
 
                     <div>
                       <div className="text-xs text-muted-foreground">
-                        Output Tokens
+                        输出 Token
                       </div>
 
                       <div className="mt-1 font-medium">
@@ -759,7 +755,7 @@ export default function UserCenterPage() {
 
                     <div>
                       <div className="text-xs text-muted-foreground">
-                        Total Tokens
+                        总 Token
                       </div>
 
                       <div className="mt-1 font-medium">
@@ -773,7 +769,7 @@ export default function UserCenterPage() {
                   <div className="mt-5 grid gap-3 border-t pt-4 text-xs text-muted-foreground sm:grid-cols-3">
                     <div>
                       <div>
-                        Created
+                        创建时间
                       </div>
 
                     <div className="mt-1 text-foreground">

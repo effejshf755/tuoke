@@ -131,6 +131,10 @@ function formatTokens(n?: number): string {
   return String(n)
 }
 
+function formatPercent(value: number): string {
+  return `${Number(value).toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1')}%`
+}
+
 function Stat({ label, value, hint, className }: { label: string; value: string | number; hint?: string; className?: string }) {
   const card = (
     <div className="rounded-3xl border bg-card px-4 py-3">
@@ -174,6 +178,7 @@ const chartVars = `
 
 export default function AnalyticsPage() {
   const { t } = useI18n()
+  const refreshOptions = { refetchInterval: 5000 }
   const [range, setRange] = useState<TimeRange>('7d')
   // Capture "now" once at mount so the savings extrapolation below stays a pure
   // render (calling Date.now() during render is impure and non-deterministic).
@@ -182,6 +187,7 @@ export default function AnalyticsPage() {
   const { data: summary, isLoading: summaryLoading } = useQuery({
     queryKey: ['analytics', 'summary', range],
     queryFn: () => apiFetch<SummaryResponse>(`/api/analytics/summary?range=${range}`),
+    ...refreshOptions,
   })
 
   const { data: byPlatform = [] } = useQuery({
@@ -197,6 +203,7 @@ export default function AnalyticsPage() {
   const { data: byModel = [] } = useQuery({
     queryKey: ['analytics', 'by-model', range],
     queryFn: () => apiFetch<ByModelRow[]>(`/api/analytics/by-model?range=${range}`),
+    ...refreshOptions,
   })
 
   const { data: byKey = [] } = useQuery({
@@ -318,6 +325,31 @@ export default function AnalyticsPage() {
             </>
           )}
         </div>
+
+        <Panel title="按模型实时概览">
+          {byModel.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-8">暂无模型请求数据</p>
+          ) : (
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {byModel.map((model) => {
+                const failed = Math.max(0, model.requests - Math.round(model.requests * model.successRate / 100))
+                return <div key={`${model.platform}-${model.modelId}`} className="rounded-2xl border p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0"><h4 className="truncate font-medium" title={model.displayName}>{model.displayName}</h4><p className="truncate text-xs text-muted-foreground">{model.platform}</p></div>
+                    <span className="shrink-0 text-xs text-muted-foreground">{model.requests} 次请求</span>
+                  </div>
+                  <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                    <div><div className="text-xs text-muted-foreground">输入 Token</div><div className="mt-1 font-semibold">{formatTokens(model.totalInputTokens)}</div></div>
+                    <div><div className="text-xs text-muted-foreground">输出 Token</div><div className="mt-1 font-semibold">{formatTokens(model.totalOutputTokens)}</div></div>
+                    <div><div className="text-xs text-muted-foreground">成功率</div><div className="mt-1 font-semibold text-emerald-500">{formatPercent(model.successRate)}</div></div>
+                    <div><div className="text-xs text-muted-foreground">失败率</div><div className="mt-1 font-semibold text-destructive">{formatPercent(Math.max(0, 100 - model.successRate))}（{failed} 次）</div></div>
+                  </div>
+                  <div className="mt-3 border-t pt-3 text-xs text-muted-foreground">平均耗时 {model.avgLatencyMs} ms</div>
+                </div>
+              })}
+            </div>
+          )}
+        </Panel>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="lg:col-span-2">

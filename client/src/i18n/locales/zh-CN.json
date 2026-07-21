@@ -23,6 +23,7 @@
     ,"recharge": "充值订单"
     ,"settings": "系统设置"
     ,"wallet": "钱包"
+    ,"me": "我的"
   },
   "auth": {
     "createYourAccount": "创建账号",

@@ -39,6 +39,7 @@ import AnalyticsPage from '@/pages/AnalyticsPage'
 import PremiumPage from '@/pages/PremiumPage'
 import NotFoundPage from '@/pages/NotFoundPage'
 import UserCenterPage from '@/pages/UserCenterPage'
+import MyPage from '@/pages/MyPage'
 import UserModelsPage from '@/pages/UserModelsPage'
 import UserAnalyticsPage from '@/pages/UserAnalyticsPage'
 import ApiDocsPage from '@/pages/ApiDocsPage'
@@ -174,7 +175,7 @@ function Navbar() {
   const location = useLocation()
   const navigate = useNavigate()
   const { data: authStatus } = useQuery<{ role: 'admin' | 'user' | null }>({ queryKey: ['auth-status'] })
-  const visibleNavItems = authStatus?.role === 'admin' ? navItems : authStatus?.role === 'user' ? [{ to: '/user-center', labelKey: 'nav.console' }, { to: '/playground', labelKey: 'nav.playground' }, { to: '/user-models', labelKey: 'nav.models' }, { to: '/analytics', labelKey: 'nav.analytics' }] : [{ to: '/', labelKey: 'nav.home' }, { to: '/user-models', labelKey: 'nav.models' }]
+  const visibleNavItems = authStatus?.role === 'admin' ? navItems : authStatus?.role === 'user' ? [{ to: '/user-center', labelKey: 'nav.console' }, { to: '/playground', labelKey: 'nav.playground' }, { to: '/user-models', labelKey: 'nav.models' }, { to: '/analytics', labelKey: 'nav.analytics' }, { to: '/my', labelKey: 'nav.me' }] : [{ to: '/', labelKey: 'nav.home' }, { to: '/user-models', labelKey: 'nav.models' }]
 
   function isActiveRoute(to: string) {
     return location.pathname === to
@@ -377,6 +378,7 @@ function App() {
                 <Route path="/analytics" element={<AnalyticsRoute />} />
                 <Route path="/premium" element={<PremiumPage />} />
                 <Route path="/user-center" element={<UserCenterPage />} />
+                <Route path="/my" element={<MyPage />} />
                 <Route path="/account-settings" element={<AccountSettingsPage />} />
                 <Route path="/user-models" element={<UserModelsPage />} />
                 <Route path="/api-docs" element={<ApiDocsPage />} />

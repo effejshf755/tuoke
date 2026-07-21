@@ -23,7 +23,7 @@ import { mcpRouter } from './routes/mcp.js';
 import { consumerApiKeysRouter } from './routes/consumer-api-keys.js';
 import { userRouter } from './routes/user.js';
 import { userWalletRouter } from './routes/user-wallet.js';
-import { userRechargeRouter, adminRechargeRouter } from './routes/recharge.js';
+import { userRechargeRouter, adminRechargeRouter, alipayNotifyRouter } from './routes/recharge.js';
 import { adminUsersRouter } from './routes/admin-users.js';
 import { adminBillingRouter } from './routes/admin-billing.js';
 import { adminWalletRouter } from './routes/admin-wallet.js';
@@ -72,6 +72,7 @@ export function createApp(config?: Config) {
   // prompts + tool schemas + repo context; 1mb cut their sessions off
   // mid-conversation with an opaque 413. (#200)
   app.use(express.json({ limit: '10mb' }));
+  app.use(express.urlencoded({ extended: false }));
 
   // Caller identity (IP + User-Agent) for request analytics, carried in
   // AsyncLocalStorage so logRequest() can read it from any depth.
@@ -82,6 +83,7 @@ export function createApp(config?: Config) {
   // The /v1 proxy keeps its own unified-API-key auth and is NOT gated here.
   app.use('/api/auth', authRouter);
   app.use('/api/public', publicPlatformRouter);
+  app.use('/api/payment/alipay/notify', alipayNotifyRouter);
 
   // API routes — all admin endpoints sit behind requireAuth.
   app.use('/api/keys', requireAuth, requireAdmin, keysRouter);
