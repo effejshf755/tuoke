@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Link, useNavigate } from 'react-router-dom'
 
 import { Button } from '@/components/ui/button'
+import Waves from '@/components/Waves'
 
 export default function PublicHomePage() {
   const navigate = useNavigate()
@@ -10,6 +11,9 @@ export default function PublicHomePage() {
   })
 
   const start = () => {
+    if (!data?.role) {
+      ;(window as any).__AUTH_MODE__ = 'login'
+    }
     navigate(
       data?.role === 'admin'
         ? '/models/chat'
@@ -48,15 +52,6 @@ export default function PublicHomePage() {
           }
         }
 
-        @keyframes home-video-drift {
-          0%, 100% {
-            transform: translate3d(-3%, -1.5%, 0) scale(1.12);
-          }
-          50% {
-            transform: translate3d(3%, 1.5%, 0) scale(1.18);
-          }
-        }
-
         .home-copy-enter {
           animation: home-copy-enter 1.1s cubic-bezier(.22, 1, .36, 1) both;
         }
@@ -65,39 +60,35 @@ export default function PublicHomePage() {
           animation: home-actions-enter .9s .45s cubic-bezier(.22, 1, .36, 1) both;
         }
 
-        .home-video-drift {
-          animation: home-video-drift 8s cubic-bezier(.45, 0, .55, 1) infinite;
-          backface-visibility: hidden;
-          transform-origin: center;
-          will-change: transform;
-        }
-
         @media (prefers-reduced-motion: reduce) {
           .home-copy-enter,
-          .home-actions-enter,
-          .home-video-drift {
+          .home-actions-enter {
             animation: none;
           }
         }
       `}</style>
 
-      <section className="relative left-1/2 -my-8 min-h-[calc(100vh-4.5rem)] w-screen -translate-x-1/2 overflow-hidden bg-black text-white">
-        <video
-          className="home-video-drift absolute inset-0 h-full w-full object-cover"
-          autoPlay
-          loop
-          muted
-          playsInline
-          preload="auto"
-          aria-hidden="true"
-        >
-          <source src="/media/tuoke-cosmos-4k120-v3.mp4" type="video/mp4" />
-        </video>
+      <section className="relative left-1/2 -my-8 min-h-screen w-screen -translate-x-1/2 overflow-hidden bg-[radial-gradient(circle_at_50%_42%,#172133_0%,#080b10_42%,#020304_78%)] text-white">
+        <div className="pointer-events-none absolute inset-0 bg-black/20" />
+        <div className="pointer-events-none absolute inset-0 shadow-[inset_0_0_180px_90px_rgba(0,0,0,.82)]" />
 
-        <div className="pointer-events-none absolute inset-0 bg-black/60" />
-        <div className="pointer-events-none absolute inset-0 shadow-[inset_0_0_180px_80px_rgba(0,0,0,.72)]" />
+        <Waves
+          className="z-[2] opacity-90"
+          lineColor="rgba(255, 255, 255, 0.38)"
+          waveSpeedX={0.0125}
+          waveSpeedY={0.008}
+          waveAmpX={38}
+          waveAmpY={18}
+          friction={0.91}
+          tension={0.007}
+          maxCursorMove={110}
+          xGap={18}
+          yGap={46}
+        />
 
-        <div className="relative z-10 flex min-h-[calc(100vh-4.5rem)] items-center justify-center px-6 py-24 text-center">
+        <div className="pointer-events-none absolute inset-0 z-[3] bg-[radial-gradient(ellipse_at_center,rgba(2,3,4,.82)_0%,rgba(2,3,4,.56)_30%,transparent_66%)]" />
+
+        <div className="relative z-10 flex min-h-screen items-center justify-center px-6 py-24 text-center">
           <div className="max-w-4xl">
             <div className="home-copy-enter">
               <p className="mb-6 text-xs font-medium uppercase tracking-[0.42em] text-white/65 sm:text-sm">

@@ -381,7 +381,7 @@ export default function AdminUsersPage() {
       onSuccess: () => {
         setError('')
         setMessage(
-          'Wallet balance updated successfully.',
+          '钱包余额更新成功。',
         )
 
         queryClient.invalidateQueries({
@@ -482,11 +482,11 @@ export default function AdminUsersPage() {
   return (
     <div className="max-w-[1600px]">
       <h1 className="text-xl font-semibold">
-        Users
+        用户管理
       </h1>
 
       <p className="mt-1 text-sm text-muted-foreground">
-        Manage users, wallet balances, API usage and sessions.
+        管理用户、钱包余额、API 使用情况和登录会话。
       </p>
 
       <div className="mt-5">
@@ -499,7 +499,7 @@ export default function AdminUsersPage() {
               event.target.value,
             )
           }
-          placeholder="Search by email..."
+          placeholder="按邮箱搜索…"
           className="max-w-md"
         />
       </div>
@@ -524,10 +524,10 @@ export default function AdminUsersPage() {
               <summary className="flex cursor-pointer list-none items-center justify-between gap-4">
                 <div className="min-w-0">
                   <div className="truncate font-medium">{user.email}</div>
-                  <div className="mt-1 text-xs text-muted-foreground">{user.role}</div>
+                  <div className="mt-1 text-xs text-muted-foreground">{user.role === 'admin' ? '管理员' : '普通用户'}</div>
                 </div>
                 <div className="flex shrink-0 items-center gap-3">
-                  <span className="rounded-full border px-2 py-1 text-xs">{user.status}</span>
+                  <span className="rounded-full border px-2 py-1 text-xs">{user.status === 'active' ? '已启用' : user.status === 'disabled' ? '已禁用' : user.status}</span>
                   <span className="font-semibold">{formatMoney(wallet?.balance ?? 0)}</span>
                   <span className="text-muted-foreground transition-transform group-open:rotate-180">⌄</span>
                 </div>
@@ -584,47 +584,47 @@ export default function AdminUsersPage() {
           <thead className="border-b bg-muted/40 text-left">
             <tr>
               <th className="p-3">
-                User
+                用户
               </th>
 
               <th className="p-3">
-                Status
+                状态
               </th>
 
               <th className="p-3">
-                Balance
+                余额
               </th>
 
               <th className="p-3">
-                Total Added
+                累计充值
               </th>
 
               <th className="p-3">
-                API Usage Cost
+                API 使用费用
               </th>
 
               <th className="p-3">
-                API Keys
+                API 密钥
               </th>
 
               <th className="p-3">
-                Tokens Used
+                Token 使用量
               </th>
 
               <th className="p-3">
-                Sessions
+                会话数
               </th>
 
               <th className="p-3">
-                Last API Activity
+                最后 API 调用
               </th>
 
               <th className="p-3">
-                Registered
+                注册时间
               </th>
 
               <th className="p-3">
-                Actions
+                操作
               </th>
             </tr>
           </thead>

@@ -1,7 +1,7 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { type ReactNode } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, NavLink, Link, useLocation, useNavigate } from 'react-router-dom'
 import { MutationCache, QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
-import { ChevronDown, Languages, Menu, MoreHorizontal, Moon, Search, Sun } from 'lucide-react'
+import { ChevronDown, Languages, Menu, MoreHorizontal, Search } from 'lucide-react'
 import { Button, buttonVariants } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -20,6 +20,7 @@ import { AuthGate } from '@/components/auth-gate'
 import { CommandPalette, openCommandPalette } from '@/components/command-palette'
 import { ErrorBoundary } from '@/components/error-boundary'
 import { Toaster } from '@/components/toaster'
+import Waves from '@/components/Waves'
 import { I18nProvider, useI18n, SUPPORTED_LOCALES, type Locale } from '@/i18n'
 import { logout } from '@/lib/api'
 import { toast } from '@/lib/toast'
@@ -88,15 +89,6 @@ const modelItems = [
 
 const isMac = typeof navigator !== 'undefined' && /mac/i.test(navigator.platform)
 
-function getPreferredDarkMode() {
-  if (typeof window === 'undefined') {
-    return false
-  }
-
-  const stored = localStorage.getItem('theme')
-  return stored === 'dark' || (!stored && window.matchMedia('(prefers-color-scheme: dark)').matches)
-}
-
 function NavItem({ to, children }: { to: string; children: React.ReactNode }) {
   return (
     <NavLink
@@ -114,28 +106,15 @@ function NavItem({ to, children }: { to: string; children: React.ReactNode }) {
   )
 }
 
-function useDarkMode() {
-  const [dark, setDark] = useState(getPreferredDarkMode)
-
-  useEffect(() => {
-    document.documentElement.classList.toggle('dark', dark)
-  }, [dark])
-
-  function toggle() {
-    setDark((current) => {
-      const next = !current
-      localStorage.setItem('theme', next ? 'dark' : 'light')
-      return next
-    })
-  }
-
-  return { dark, toggle }
-}
-
 // True when the dashboard runs inside the desktop shell (Electron preload
 // sets this). The navbar then doubles as the window title bar: draggable,
 // padded for the macOS traffic lights, and without the web-only Sign out.
 const isDesktopApp = typeof window !== 'undefined' && (window as any).__FREEAPI_DESKTOP__ === true
+
+// The product uses a single dark visual system so transparent surfaces and
+// the animated background remain consistent on every route.
+document.documentElement.classList.add('dark')
+localStorage.setItem('theme', 'dark')
 
 // The preload's own early classList.add can be lost (it may run before this
 // document exists), so the client claims the class itself at module load —
@@ -170,9 +149,9 @@ function LanguageSubMenu() {
 }
 
 function Navbar() {
-  const { dark, toggle } = useDarkMode()
   const { t } = useI18n()
   const location = useLocation()
+  const isPublicHome = location.pathname === '/'
   const navigate = useNavigate()
   const { data: authStatus } = useQuery<{ role: 'admin' | 'user' | null }>({ queryKey: ['auth-status'] })
   const visibleNavItems = authStatus?.role === 'admin' ? navItems : authStatus?.role === 'user' ? [{ to: '/user-center', labelKey: 'nav.console' }, { to: '/playground', labelKey: 'nav.playground' }, { to: '/user-models', labelKey: 'nav.models' }, { to: '/analytics', labelKey: 'nav.analytics' }, { to: '/my', labelKey: 'nav.me' }] : [{ to: '/', labelKey: 'nav.home' }, { to: '/user-models', labelKey: 'nav.models' }]
@@ -185,7 +164,7 @@ function Navbar() {
     <header
       // In the desktop shell the body backdrop is already translucent glass;
       // a lighter wash keeps the title bar from looking more solid than the page.
-      className={`sticky top-0 z-40 border-b backdrop-blur ${isDesktopApp ? 'bg-background/45' : 'bg-background/80'}`}
+      className={`${isPublicHome ? 'fixed inset-x-0' : 'sticky'} top-0 z-40 border-transparent bg-transparent shadow-none backdrop-blur-none`}
       style={isDesktopApp ? ({ WebkitAppRegion: 'drag' } as React.CSSProperties) : undefined}
     >
       <div
@@ -194,7 +173,7 @@ function Navbar() {
       >
           <Link to="/" className="flex items-center gap-2 transition-opacity hover:opacity-70"><span className="inline-block size-2 rounded-full bg-foreground" /><span className="font-semibold tracking-tight text-sm">Tuoke API</span></Link>
         <nav
-          className="ml-10 hidden items-center gap-6 md:flex"
+          className="ml-10 hidden items-center gap-6 xl:flex"
           style={isDesktopApp ? ({ WebkitAppRegion: 'no-drag' } as React.CSSProperties) : undefined}
         >
           {visibleNavItems.map((item) =>
@@ -227,7 +206,7 @@ function Navbar() {
           )}
         </nav>
         <div
-          className="ml-auto hidden items-center gap-1 md:flex"
+          className="ml-auto hidden items-center gap-1 xl:flex"
           style={isDesktopApp ? ({ WebkitAppRegion: 'no-drag' } as React.CSSProperties) : undefined}
         >
           <button
@@ -247,10 +226,6 @@ function Navbar() {
               <MoreHorizontal />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-48">
-              <DropdownMenuItem onClick={toggle} className="justify-between">
-                <span>{t('nav.theme')}</span>
-                {dark ? <Sun /> : <Moon />}
-              </DropdownMenuItem>
               <DropdownMenuItem onClick={() => navigate('/api-docs')}>API 文档</DropdownMenuItem>
               {authStatus?.role === 'user' && <DropdownMenuItem onClick={() => navigate('/keys')}>API 密钥</DropdownMenuItem>}
               <LanguageSubMenu />
@@ -264,7 +239,7 @@ function Navbar() {
           </DropdownMenu>
           {!authStatus?.role && <div className="ml-2 flex gap-2"><ButtonLink to="/login">登录</ButtonLink><ButtonLink to="/login" register>注册</ButtonLink></div>}
         </div>
-        <div className="ml-auto md:hidden">
+        <div className="ml-auto xl:hidden">
           <DropdownMenu>
             <DropdownMenuTrigger
               className={buttonVariants({ variant: 'ghost', size: 'icon' })}
@@ -305,15 +280,11 @@ function Navbar() {
               <DropdownMenuGroup>
                 <DropdownMenuItem onClick={() => navigate('/api-docs')}>API 文档</DropdownMenuItem>
                 {authStatus?.role === 'user' && <DropdownMenuItem onClick={() => navigate('/keys')}>API 密钥</DropdownMenuItem>}
-                <DropdownMenuItem onClick={toggle} className="justify-between">
-                  <span>{t('nav.theme')}</span>
-                  {dark ? <Sun /> : <Moon />}
-                </DropdownMenuItem>
                 <LanguageSubMenu />
                 {!isDesktopApp && (
                   <DropdownMenuItem onClick={() => logout()}>{t('nav.signOut')}</DropdownMenuItem>
                 )}
-                {!authStatus?.role && <><DropdownMenuSeparator /><DropdownMenuItem onClick={() => navigate('/login')}>登录</DropdownMenuItem><DropdownMenuItem onClick={() => { (window as any).__AUTH_MODE__ = 'register'; navigate('/login') }}>注册</DropdownMenuItem></>}
+                {!authStatus?.role && <><DropdownMenuSeparator /><DropdownMenuItem onClick={() => { (window as any).__AUTH_MODE__ = 'login'; navigate('/login') }}>登录</DropdownMenuItem><DropdownMenuItem onClick={() => { (window as any).__AUTH_MODE__ = 'register'; navigate('/login') }}>注册</DropdownMenuItem></>}
               </DropdownMenuGroup>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -346,7 +317,32 @@ function PageBoundary({ children }: { children: ReactNode }) {
 
 function ButtonLink({ to, register, children }: { to: string; register?: boolean; children: React.ReactNode }) {
   const navigate = useNavigate()
-  return <Button size="sm" variant={register ? 'default' : 'outline'} onClick={() => { if (register) (window as any).__AUTH_MODE__ = 'register'; navigate(to) }}>{children}</Button>
+  return <Button size="sm" variant={register ? 'default' : 'outline'} onClick={() => { (window as any).__AUTH_MODE__ = register ? 'register' : 'login'; navigate(to) }}>{children}</Button>
+}
+
+function AppBackground() {
+  const location = useLocation()
+
+  if (location.pathname === '/') return null
+
+  return (
+    <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden" aria-hidden="true">
+      <Waves
+        className="opacity-[0.34] dark:opacity-[0.42]"
+        lineColor="rgba(128, 128, 128, 0.72)"
+        waveSpeedX={0.008}
+        waveSpeedY={0.004}
+        waveAmpX={24}
+        waveAmpY={10}
+        friction={0.93}
+        tension={0.006}
+        maxCursorMove={70}
+        xGap={23}
+        yGap={52}
+      />
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_10%,var(--background)_94%)] opacity-45" />
+    </div>
+  )
 }
 
 function App() {
@@ -355,9 +351,10 @@ function App() {
       <I18nProvider>
       <BrowserRouter basename={import.meta.env.BASE_URL}>
         <AuthGate>
-          <div className={`min-h-screen ${isDesktopApp ? 'desktop-backdrop' : 'bg-background'}`}>
+          <div className={`relative min-h-screen ${isDesktopApp ? 'desktop-backdrop' : 'bg-background'}`}>
             <Navbar />
-            <main className="max-w-6xl mx-auto px-6 py-8">
+            <AppBackground />
+            <main className="relative z-10 max-w-6xl mx-auto px-6 py-8">
               <PageBoundary>
               <Routes>
                 <Route path="/" element={<PublicHomePage />} />

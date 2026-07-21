@@ -55,7 +55,7 @@
 :root {
     --background: oklch(0.995 0 0);
     --foreground: oklch(0.18 0 0);
-    --card: oklch(1 0 0);
+    --card: oklch(1 0 0 / 62%);
     --card-foreground: oklch(0.18 0 0);
     --popover: oklch(1 0 0);
     --popover-foreground: oklch(0.18 0 0);
@@ -90,7 +90,7 @@
 .dark {
     --background: oklch(0.135 0 0);
     --foreground: oklch(0.98 0 0);
-    --card: oklch(0.175 0 0);
+    --card: oklch(0.175 0 0 / 64%);
     --card-foreground: oklch(0.98 0 0);
     --popover: oklch(0.175 0 0);
     --popover-foreground: oklch(0.98 0 0);
@@ -158,5 +158,29 @@
     /* Tighter focus ring across inputs */
     input, textarea, select {
         font-feature-settings: 'ss01';
+    }
+}
+
+@layer components {
+    /* Shared glass treatment for the product surfaces while keeping inputs
+       and menus more solid for legibility. */
+    :where(.rounded-2xl.bg-card, .rounded-3xl.bg-card, [data-slot="card"]) {
+        box-shadow:
+            inset 0 1px 0 color-mix(in oklab, var(--foreground) 8%, transparent),
+            0 14px 40px color-mix(in oklab, var(--background) 16%, transparent);
+    }
+
+    .dark :where(.rounded-2xl.bg-card, .rounded-3xl.bg-card, [data-slot="card"]) {
+        box-shadow:
+            inset 0 1px 0 color-mix(in oklab, white 9%, transparent),
+            0 18px 46px rgb(0 0 0 / 18%);
+    }
+
+    [data-slot="dropdown-menu-content"] {
+        background-color: transparent;
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+        box-shadow: none;
+        border-color: color-mix(in oklab, var(--foreground) 20%, transparent);
     }
 }

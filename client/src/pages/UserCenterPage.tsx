@@ -192,7 +192,7 @@ export default function UserCenterPage() {
       setKeyError('')
 
       setKeyMessage(
-        'API key created successfully. Copy it now because the full key will not be shown again.',
+        'API 密钥创建成功。完整密钥只会显示一次，请立即复制保存。',
       )
 
       client.invalidateQueries({
@@ -216,7 +216,7 @@ export default function UserCenterPage() {
 
     if (!name.trim()) {
       setKeyError(
-        'Please enter a key name.',
+        '请输入 API 密钥名称。',
       )
 
       return
@@ -227,7 +227,7 @@ export default function UserCenterPage() {
     ) {
       if (!customExpiresAt) {
         setKeyError(
-          'Please select an expiration date.',
+          '请选择过期时间。',
         )
 
         return
@@ -241,7 +241,7 @@ export default function UserCenterPage() {
         timestamp <= Date.now()
       ) {
         setKeyError(
-          'Expiration date must be in the future.',
+          '过期时间必须晚于当前时间。',
         )
 
         return
@@ -277,7 +277,7 @@ export default function UserCenterPage() {
     onSuccess: () => {
       setKeyError('')
       setKeyMessage(
-        'API key status updated.',
+        'API 密钥状态已更新。',
       )
 
       client.invalidateQueries({
@@ -310,7 +310,7 @@ export default function UserCenterPage() {
     onSuccess: () => {
       setKeyError('')
       setKeyMessage(
-        'API key revoked permanently.',
+        'API 密钥已永久撤销。',
       )
 
       client.invalidateQueries({
@@ -330,7 +330,7 @@ export default function UserCenterPage() {
   function revokeKey(key: Key) {
     const confirmed =
       window.confirm(
-        `Revoke "${key.name}" permanently?\n\nThis action cannot be undone.`,
+        `确定永久撤销“${key.name}”吗？\n\n此操作无法撤销。`,
       )
 
     if (!confirmed) {
@@ -382,7 +382,7 @@ export default function UserCenterPage() {
         </div>
 
         <div className="hidden mt-5 flex flex-wrap gap-2">
-          <Link className={buttonVariants()} to="/playground">开始 Playground</Link>
+          <Link className={buttonVariants()} to="/playground">进入试玩台</Link>
           <Link className={buttonVariants({ variant: 'outline' })} to="/models">浏览模型</Link>
           <Link className={buttonVariants({ variant: 'outline' })} to="/api-docs">API 文档</Link>
           <a className={buttonVariants({ variant: 'outline' })} href="#api-keys">管理 API Key</a>
@@ -406,7 +406,7 @@ export default function UserCenterPage() {
 
       {false && <div id="api-keys" className="mt-6 rounded-3xl border bg-card p-6">
         <h2 className="font-medium">
-          Usage
+          使用情况
         </h2>
 
         <div className="mt-4 grid grid-cols-2 gap-4 text-sm sm:grid-cols-4">

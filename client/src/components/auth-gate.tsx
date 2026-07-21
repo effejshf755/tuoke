@@ -16,6 +16,7 @@ import { Label } from '@/components/ui/label'
 import { isEmail } from '@/lib/validate'
 import { useI18n } from '@/i18n'
 import { ForgotPasswordForm } from '@/components/forgot-password-form'
+import Waves from '@/components/Waves'
 
 const PASSWORD_MIN = 8
 
@@ -28,8 +29,22 @@ export interface AuthStatus {
 
 function Centered({ children }: { children: ReactNode }) {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background px-4">
-      <div className="w-full max-w-sm">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[radial-gradient(circle_at_50%_42%,#172133_0%,#080b10_42%,#020304_78%)] px-4">
+      <Waves
+        className="opacity-75"
+        lineColor="rgba(255, 255, 255, 0.3)"
+        waveSpeedX={0.009}
+        waveSpeedY={0.005}
+        waveAmpX={28}
+        waveAmpY={12}
+        friction={0.92}
+        tension={0.007}
+        maxCursorMove={80}
+        xGap={22}
+        yGap={52}
+      />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(2,3,4,.76)_0%,rgba(2,3,4,.42)_34%,transparent_72%)]" />
+      <div className="relative z-10 w-full max-w-sm">
         {children}
       </div>
     </div>
@@ -62,7 +77,7 @@ function AuthForm({
   const [countdown, setCountdown] = useState(0)
   const [codeMessage, setCodeMessage] = useState('')
 
-  // 首次初始化管理员使用�?setup code
+// 首次初始化管理员使用设置代码
   const [setupCode, setSetupCode] = useState('')
   const [codeRequired, setCodeRequired] = useState(false)
 
@@ -74,7 +89,8 @@ function AuthForm({
   const isRegister = mode === 'register'
 
   // ============================================================
-  // 验证码发送倒计�?  // ============================================================
+// 验证码发送倒计时
+// ============================================================
 
   useEffect(() => {
     if (countdown <= 0) {
@@ -158,7 +174,8 @@ function AuthForm({
   }
 
   // ============================================================
-  // 登录 / 注册 / 首次初始�?  // ============================================================
+// 登录 / 注册 / 首次初始化
+// ============================================================
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
@@ -241,14 +258,14 @@ function AuthForm({
   const description = isSetup
     ? t('auth.setupDescription')
     : isRegister
-      ? 'Create an account with email verification.'
+      ? '使用邮箱验证创建账号。'
       : t('auth.loginDescription')
 
   const submitText = busy
     ? isSetup
       ? t('auth.creating')
       : isRegister
-        ? '注册�?..'
+        ? '注册中…'
         : t('auth.signingIn')
     : isSetup
       ? t('auth.createAccount')
@@ -265,7 +282,7 @@ function AuthForm({
         </span>
       </div>
 
-      <div className="rounded-3xl border bg-card p-6">
+      <div className="rounded-3xl border border-foreground/15 bg-transparent p-6 shadow-none">
         <h1 className="text-base font-medium">
           {title}
         </h1>
@@ -319,7 +336,7 @@ function AuthForm({
                     ? '发送中...'
                     : countdown > 0
                       ? `${countdown}s`
-                      : 'Send code'}
+                      : '发送验证码'}
                 </Button>
               )}
             </div>
@@ -335,14 +352,15 @@ function AuthForm({
             )}
           </div>
 
-          {/* 注册邮箱验证�?*/}
+          {/* 注册邮箱验证码 */}
           {isRegister && (
             <div className="space-y-1.5">
               <Label
                 className="text-xs"
                 htmlFor="auth-verification-code"
               >
-                邮箱验证�?              </Label>
+                邮箱验证码
+              </Label>
 
               <Input
                 id="auth-verification-code"
@@ -358,7 +376,7 @@ function AuthForm({
 
                   setVerificationCode(value)
                 }}
-                placeholder="请输�?位验证码"
+                placeholder="请输入 6 位验证码"
                 aria-invalid={
                   attempted &&
                   !!verificationCodeError
@@ -372,7 +390,8 @@ function AuthForm({
               )}
 
               <p className="text-xs text-muted-foreground">
-                验证码有效期�?分钟�?              </p>
+                验证码有效期为 10 分钟。
+              </p>
             </div>
           )}
 
@@ -500,7 +519,7 @@ function AuthForm({
           >
             {isRegister
               ? '已经有账号？立即登录'
-              : 'No account? Register'}
+              : '还没有账号？立即注册'}
           </button>
         )}
       </div>
@@ -589,7 +608,7 @@ export function AuthGate({
     )
   }
 
-  // 普通登�?/ 注册
+// 普通登录 / 注册
   if (
     !data.authenticated &&
     location.pathname !== '/'
