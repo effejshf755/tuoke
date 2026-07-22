@@ -223,7 +223,11 @@ proxyRouter.get('/models', (req: Request, res: Response) => {
   // window among models that can serve a request right now. Advertising null
   // makes OpenAI-compatible clients (opencode, Continue) fall back to their own
   // conservative default and truncate long inputs before they reach us (#282).
-  const consumerRequest = token.startsWith('tuoke-');
+  // A consumer key must only discover models that the administrator has made
+  // usable for billed users. Determine this from the validated key record,
+  // rather than from a string prefix alone, so every third-party model picker
+  // receives the same user-visible catalog policy.
+  const consumerRequest = validateConsumerApiKey(getDb(), token) !== null;
   const catalog = consumerRequest
     ? filterModelListingForConsumer(buildModelListing())
     : buildModelListing();

@@ -44,7 +44,7 @@ export function TokenUsageBar({ data }: { data: TokenUsageData }) {
 
   return (
     <section className="rounded-3xl border bg-card p-5">
-      <div className="flex items-baseline justify-between mb-3">
+      <div className="flex items-baseline justify-between mb-3 gap-3">
         <h2 className="text-sm font-medium">{t('models.monthlyTokenBudget')}</h2>
         <span className="text-xs text-muted-foreground tabular-nums">
           <span className="text-foreground font-medium">{formatTokens(remaining)}</span> {t('models.remaining')}
@@ -58,6 +58,21 @@ export function TokenUsageBar({ data }: { data: TokenUsageData }) {
           )}
         </span>
       </div>
+
+      {data.liveCredits && (
+        <div className="mb-3 rounded-xl border border-emerald-500/25 bg-emerald-500/5 px-3 py-2 text-xs">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-medium text-emerald-500">OpenRouter 实时额度</span>
+            <span className="text-muted-foreground">{data.liveCredits.keyCount} 个启用 Key</span>
+            <span className="ml-auto text-muted-foreground">按 Key 健康检查更新</span>
+          </div>
+          <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 tabular-nums">
+            <span>剩余 <b>{data.liveCredits.remaining.toFixed(2)}</b></span>
+            <span>总额 <b>{data.liveCredits.total.toFixed(2)}</b></span>
+            <span className="text-muted-foreground">最近更新 {data.liveCredits.observedAt ?? '—'}</span>
+          </div>
+        </div>
+      )}
 
       <div className="flex h-2.5 rounded-full overflow-hidden bg-muted">
         {modelsWithWidth.map((m, i) => (

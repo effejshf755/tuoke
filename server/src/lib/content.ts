@@ -78,7 +78,12 @@ export function sanitizeResponse<T>(payload: T): T {
       if (!choice || typeof choice !== 'object') continue;
       const c = choice as { finish_reason?: unknown; message?: { tool_calls?: unknown }; delta?: { tool_calls?: unknown } };
       if (c.finish_reason === undefined) c.finish_reason = null;
-      if (c.message && typeof c.message === 'object' && c.message.tool_calls === null) delete c.message.tool_calls;
+      if (c.message && typeof c.message === 'object') {
+        if (c.message.tool_calls === null) delete c.message.tool_calls;
+        delete (c.message as any).reasoning;
+        delete (c.message as any).reasoning_content;
+        delete (c.message as any).reasoning_details;
+      }
       if (c.delta && typeof c.delta === 'object' && c.delta.tool_calls === null) delete c.delta.tool_calls;
     }
   }

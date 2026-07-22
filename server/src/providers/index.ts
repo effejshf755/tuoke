@@ -56,6 +56,13 @@ register(new OpenAICompatProvider({
   baseUrl: 'https://api.mistral.ai/v1',
 }));
 
+// DeepSeek - OpenAI-compatible official API
+register(new OpenAICompatProvider({
+  platform: 'deepseek',
+  name: 'DeepSeek',
+  baseUrl: 'https://api.deepseek.com/v1',
+}));
+
 // OpenRouter - OpenAI-compatible with extra headers
 register(new OpenAICompatProvider({
   platform: 'openrouter',
@@ -243,7 +250,7 @@ register(new OpenAICompatProvider({
 register(new OpenAICompatProvider({
   platform: 'siliconflow',
   name: 'SiliconFlow',
-  baseUrl: 'https://api.siliconflow.com/v1',
+  baseUrl: 'https://api.siliconflow.cn/v1',
 }));
 
 // Routeway — OpenAI-compatible aggregator (api.routeway.ai/v1). Free models

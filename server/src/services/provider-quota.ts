@@ -454,12 +454,16 @@ export function getQuotaStateForKeys(): QuotaObservationView[] {
       latest.raw_json AS rawJson,
       latest.created_at AS createdAt
     FROM provider_quota_state pqs
+    LEFT JOIN api_keys active_keys
+      ON active_keys.id = pqs.key_id
+     AND active_keys.enabled = 1
     LEFT JOIN latest
       ON latest.platform = pqs.platform
      AND latest.key_id = pqs.key_id
      AND latest.quota_pool_key = pqs.quota_pool_key
      AND latest.metric = pqs.metric
      AND latest.rn = 1
+    WHERE pqs.key_id = 0 OR active_keys.id IS NOT NULL
     ORDER BY pqs.platform ASC, pqs.key_id ASC, pqs.quota_pool_key ASC, pqs.metric ASC
   `).all() as QuotaObservationView[];
 }

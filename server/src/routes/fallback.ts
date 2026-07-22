@@ -335,6 +335,21 @@ fallbackRouter.get('/token-usage', (_req: Request, res: Response) => {
       .map(k => [k.platform, k.count])
   );
 
+  // Live account credits are collected by the per-key health checker. Keep
+  // this separate from the catalog's monthlyTokenBudget, which is only a
+  // provider-published estimate and is not an account balance.
+  const liveCreditRows = db.prepare(`
+    SELECT COALESCE(SUM(pqs.limit_value), 0) AS total,
+           COALESCE(SUM(pqs.remaining_value), 0) AS remaining,
+           COUNT(*) AS key_count,
+           MAX(pqs.observed_at) AS observed_at
+      FROM provider_quota_state pqs
+      JOIN api_keys ak ON ak.id = pqs.key_id AND ak.enabled = 1
+     WHERE pqs.platform = 'openrouter'
+       AND pqs.metric = 'credits'
+       AND pqs.remaining_value IS NOT NULL
+  `).get() as { total: number; remaining: number; key_count: number; observed_at: string | null };
+
   const modelBudgets = rawModels
     .filter(m => platformSet.has(m.platform))
     .map(m => {
@@ -362,5 +377,12 @@ fallbackRouter.get('/token-usage', (_req: Request, res: Response) => {
     totalBudget,
     totalUsed,
     models: modelBudgets,
+    liveCredits: liveCreditRows.key_count > 0 ? {
+      platform: 'openrouter',
+      total: liveCreditRows.total,
+      remaining: liveCreditRows.remaining,
+      keyCount: liveCreditRows.key_count,
+      observedAt: liveCreditRows.observed_at,
+    } : null,
   });
 });

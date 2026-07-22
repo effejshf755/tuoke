@@ -17,7 +17,7 @@ export const keysRouter = Router();
 // was dropped in V4 and re-added in V13 via the router.huggingface.co route.
 // SambaNova was dropped in V23 (free tier permanently retired).
 const PLATFORMS = [
-  'google', 'groq', 'cerebras', 'nvidia', 'mistral',
+  'google', 'groq', 'cerebras', 'nvidia', 'mistral', 'deepseek',
   'openrouter', 'github', 'cohere', 'cloudflare', 'zhipu', 'ollama',
   'kilo', 'pollinations', 'llm7', 'huggingface', 'opencode', 'ovh', 'agnes', 'reka', 'siliconflow',
   'routeway', 'bazaarlink', 'ainative', 'aion', 'requesty', 'navy', 'nara', 'sealion', 'aihorde', 'custom',
@@ -728,6 +728,9 @@ keysRouter.delete('/:id', (req: Request, res: Response) => {
   }
 
   const remove = db.transaction(() => {
+    // Remove the live snapshot for this key, but keep provider_quota_observations
+    // as historical monitoring data.
+    db.prepare('DELETE FROM provider_quota_state WHERE key_id = ?').run(id);
     db.prepare('DELETE FROM api_keys WHERE id = ?').run(id);
     // Custom models exist only because POST /custom registered them alongside
     // their endpoint key (#117) — they can't route without it. Cascade away

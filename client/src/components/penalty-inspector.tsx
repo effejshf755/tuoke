@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { AlertTriangle, ChevronDown, Clock3, Gauge } from 'lucide-react'
 import { useI18n } from '@/i18n'
 import { apiFetch } from '@/lib/api'
+import { formatBeijingDateTime } from '@/lib/utils'
 
 // Collapse state persists so a returning user keeps their last choice; a fresh
 // install (no stored value) defaults to collapsed to keep the routing page calm.
@@ -67,9 +68,7 @@ function formatDuration(ms: number): string {
 }
 
 function formatTime(value: string): string {
-  const date = new Date(`${value.replace(' ', 'T')}Z`)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  return formatBeijingDateTime(value, { hour: '2-digit', minute: '2-digit', hour12: false })
 }
 
 function penaltyClass(value: number): string {

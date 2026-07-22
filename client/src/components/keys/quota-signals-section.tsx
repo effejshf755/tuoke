@@ -1,6 +1,6 @@
 import type { ProviderQuotaState } from '../../../../shared/types'
 import { EmptyState } from '@/components/empty-state'
-import { formatSqliteUtcToLocalTime } from '@/lib/utils'
+import { formatBeijingDateTime, formatSqliteUtcToLocalTime } from '@/lib/utils'
 import { useI18n } from '@/i18n'
 
 function formatQuotaNumber(value: number | null): string {
@@ -8,9 +8,7 @@ function formatQuotaNumber(value: number | null): string {
 }
 
 function formatResetAt(value: string | null): string {
-  if (!value) return '—'
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString()
+  return formatBeijingDateTime(value)
 }
 
 export function QuotaSignalsSection({ states }: { states: ProviderQuotaState[] }) {

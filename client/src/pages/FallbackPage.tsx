@@ -89,6 +89,7 @@ export default function FallbackPage() {
   const { data: tokenUsage } = useQuery<TokenUsageData>({
     queryKey: ['fallback', 'token-usage'],
     queryFn: () => apiFetch('/api/fallback/token-usage'),
+    refetchInterval: 60_000,
   })
 
   const { data: routing } = useQuery<RoutingData>({

@@ -10,6 +10,7 @@ import {
 } from '../lib/password.js';
 import { consumerQuota } from '../middleware/consumerQuota.js';
 import { chatCompletionHandler } from './proxy.js';
+import { getModelHealthMap } from '../services/model-health.js';
 
 
 export const userRouter = Router();
@@ -153,7 +154,9 @@ userRouter.get('/requests', (req, res) => {
  * 当前可用模型
  */
 userRouter.get('/models', (_req, res) => {
-  const rows = getDb()
+  const db = getDb();
+  const health = getModelHealthMap(db);
+  const rows = db
     .prepare(`
       SELECT
         models.model_id,
@@ -184,7 +187,8 @@ userRouter.get('/models', (_req, res) => {
   models.intelligence_rank ASC,
   models.model_id ASC
     `)
-    .all();
+    .all()
+    .filter((row: any) => health[`${row.platform}:${row.model_id}`]?.status !== 'failed');
 
   res.json({
     models: [
@@ -302,6 +306,18 @@ userRouter.post('/playground/conversations', (req, res) => {
 
   res.json({
     id: Number(result.lastInsertRowid),
+  });
+});
+
+userRouter.delete('/playground/conversations', (req, res) => {
+  const userId = getUserId(req);
+  const result = getDb()
+    .prepare('DELETE FROM playground_conversations WHERE user_id = ?')
+    .run(userId);
+
+  res.json({
+    success: true,
+    deleted: result.changes,
   });
 });
 

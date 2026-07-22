@@ -1,4 +1,4 @@
-import type {
+﻿import type {
   ChatMessage,
   ChatCompletionResponse,
   ChatCompletionChunk,
@@ -64,7 +64,7 @@ export class OpenAICompatProvider extends BaseProvider {
   /** Some providers (Groq especially) reject a model's tool call with a 400
    * `tool_use_failed` when the model emitted it as inline DIALECT TEXT
    * (`<function=NAME{...}</function>`, Hermes/Qwen XML, etc.) that the provider's
-   * own parser couldn't convert — but they hand back the raw text in
+   * own parser couldn't convert 鈥?but they hand back the raw text in
    * `error.failed_generation`. Weaker tool models (e.g. groq llama-3.3-70b) hit
    * this constantly, dead-ending an agent's whole turn even though the call is
    * perfectly recoverable. Reuse the same inline-dialect rescue the proxy already
@@ -87,7 +87,7 @@ export class OpenAICompatProvider extends BaseProvider {
   }
 
   /** Keyless providers (Kilo's anonymous free tier) must send NO Authorization
-   * header — a stored sentinel like `Bearer no-key` could be treated as an
+   * header 鈥?a stored sentinel like `Bearer no-key` could be treated as an
    * invalid key. Everyone else sends the bearer as usual. */
   private authHeader(apiKey: string): Record<string, string> {
     return this.keyless ? {} : { 'Authorization': `Bearer ${apiKey}` };
@@ -190,6 +190,7 @@ export class OpenAICompatProvider extends BaseProvider {
       throw providerHttpError(res, `${this.name} API error ${res.status}: ${(err as any).error?.message ?? res.statusText}`);
     }
 
+
     let data: ChatCompletionResponse;
     let parseErr: unknown;
     try {
@@ -207,13 +208,13 @@ export class OpenAICompatProvider extends BaseProvider {
       //       first one ends ("Unexpected non-whitespace character after JSON
       //       at position <n> (line <n> column <n>)") where <n> sits inside
       //       the whitespace between two valid JSON documents.
-      //   (2) the upstream connection was cut short mid-response — most often
+      //   (2) the upstream connection was cut short mid-response 鈥?most often
       //       Cloudflare's 600-second edge idle keepalive dropping a slow
       //       free-tier queue (Kilo provider, NVIDIA nemotron / Poolside
       //       Laguna models on Cloudflare-fronted upstreams). Signals: body
       //       ends inside a string or mid-token, parser sees
       //       "Unexpected end of JSON input"; Content-Type is application/json
-      //       (CF proxies it transparently); latency_ms ≈ 600000.
+      //       (CF proxies it transparently); latency_ms 鈮?600000.
       // Without this split every Cloudflare-truncated request was logged as
       // "endpoint is not OpenAI-compatible", which sent operators chasing a
       // base-URL config bug that doesn't exist (#430).
@@ -225,7 +226,7 @@ export class OpenAICompatProvider extends BaseProvider {
       // Only attribute it to a CDN keepalive when the upstream claims to be
       // sending JSON (Content-Type: application/json). Without that hint,
       // the parser is more likely choking on NDJSON, native API output, or
-      // HTML — all "wrong endpoint" cases. This is the safe default.
+      // HTML 鈥?all "wrong endpoint" cases. This is the safe default.
       const looksTruncated =
         /Unexpected end of JSON input/.test(msg) ||
         (/Unexpected non-whitespace character after JSON at position/.test(msg) && looksLikeJson && !looksLikeNdjson);
@@ -237,7 +238,7 @@ export class OpenAICompatProvider extends BaseProvider {
         );
       }
       throw new Error(
-        `${this.name} returned 200 with a non-JSON body — the endpoint is not OpenAI-compatible. ` +
+        `${this.name} returned 200 with a non-JSON body 鈥?the endpoint is not OpenAI-compatible. ` +
         `Check the base URL (for Ollama use http://host:11434/v1, for llama.cpp/vLLM/LM Studio the /v1 path).`,
       );
     }
@@ -304,7 +305,7 @@ export class OpenAICompatProvider extends BaseProvider {
   async validateKey(apiKey: string, quotaContext?: QuotaObservationContext): Promise<boolean> {
     // Note: transport errors (DNS / timeout / TLS) propagate to the caller.
     // health.ts catches them and marks status='error' WITHOUT incrementing
-    // the consecutive-failure counter — only confirmed 401/403 disables a key.
+    // the consecutive-failure counter 鈥?only confirmed 401/403 disables a key.
     const url = this.validateUrl ?? `${this.baseUrl}/models`;
     // 30s (not 10s): some upstreams return a large /v1/models catalog that
     // takes >10s from high-latency regions (e.g. NVIDIA NIM measured ~11.2s
@@ -345,12 +346,13 @@ function normalizeChoices(data: ChatCompletionResponse): void {
       reasoning?: string;
       content: unknown;
     };
-    // Flatten array content (Mistral magistral) → join text segments.
+    // Flatten array content (Mistral magistral) 鈫?join text segments.
     if (Array.isArray(msg.content)) {
       msg.content = (msg.content as Array<{ text?: string; type?: string }>)
         .map(seg => (typeof seg === 'string' ? seg : (seg.text ?? '')))
         .join('');
     }
+
     // Fold reasoning into content if content is empty AND there are no
     // tool_calls. With tool_calls present, content=null is the correct OpenAI
     // shape; folding reasoning would confuse clients that branch on content.
@@ -362,6 +364,8 @@ function normalizeChoices(data: ChatCompletionResponse): void {
         ? msg.reasoning_content
         : (typeof msg.reasoning === 'string' && msg.reasoning.length > 0 ? msg.reasoning : null);
       if (fold !== null) msg.content = fold;
+
+
     }
   }
 }

@@ -11,6 +11,7 @@ import { Button, buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import UserRequestHistory from '@/components/UserRequestHistory'
+import { formatBeijingDateTime } from '@/lib/utils'
 
 type Expiration =
   | 'never'
@@ -65,14 +66,7 @@ function formatDate(value: string | null) {
   if (!value) {
     return 'Never'
   }
-
-  const date = new Date(value)
-
-  if (Number.isNaN(date.getTime())) {
-    return value
-  }
-
-  return date.toLocaleString()
+  return formatBeijingDateTime(value)
 }
 
 function getKeyDisplayStatus(key: Key) {

@@ -11,6 +11,7 @@ import {
 import { apiFetch } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { formatBeijingDateTime } from '@/lib/utils'
 
 type AdminUser = {
   id: number
@@ -85,19 +86,7 @@ function formatDate(
   if (!value) {
     return 'Never'
   }
-
-  const date =
-    new Date(value)
-
-  if (
-    Number.isNaN(
-      date.getTime(),
-    )
-  ) {
-    return value
-  }
-
-  return date.toLocaleString()
+  return formatBeijingDateTime(value)
 }
 
 export default function AdminUsersPage() {
@@ -125,6 +114,9 @@ export default function AdminUsersPage() {
   ] = useState<WalletUser | null>(
     null,
   )
+  const [walletAdjust, setWalletAdjust] = useState<{ user: AdminUser; action: 'add' | 'subtract' } | null>(null)
+  const [walletAmount, setWalletAmount] = useState('')
+  const [walletNote, setWalletNote] = useState('')
 
   /*
    * 用户基本信息
@@ -410,7 +402,23 @@ export default function AdminUsersPage() {
       },
     })
 
-  function handleWalletAdjust(
+  function handleWalletAdjust(user: AdminUser, action: 'add' | 'subtract') {
+    setWalletAmount('')
+    setWalletNote('')
+    setWalletAdjust({ user, action })
+  }
+
+  function submitWalletAdjust() {
+    if (!walletAdjust) return
+    const amount = Number(walletAmount)
+    if (!Number.isFinite(amount) || amount <= 0) { setError('请输入大于 0 的金额。'); return }
+    if (walletAdjust.action === 'subtract' && !window.confirm(`确认从 ${walletAdjust.user.email} 扣除 $${amount.toFixed(2)}？`)) return
+    adjustWallet.mutate({ id: walletAdjust.user.id, action: walletAdjust.action, amount, note: walletNote.trim() || undefined })
+    setWalletAdjust(null)
+  }
+
+  /*
+  function legacyHandleWalletAdjust(
     user: AdminUser,
     action:
       | 'add'
@@ -474,6 +482,7 @@ export default function AdminUsersPage() {
         undefined,
     })
   }
+  */
 
   const isLoading =
     usersQuery.isLoading ||
@@ -516,6 +525,16 @@ export default function AdminUsersPage() {
         </div>
       )}
 
+      {walletAdjust && <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm" onMouseDown={(event) => { if (event.target === event.currentTarget) setWalletAdjust(null) }}>
+        <div className="w-full max-w-md rounded-2xl border border-border/80 bg-background/95 p-5 shadow-2xl backdrop-blur-xl">
+          <h2 className="font-semibold">{walletAdjust.action === 'add' ? '增加余额' : '扣除余额'}</h2>
+          <p className="mt-1 text-sm text-muted-foreground">{walletAdjust.user.email}</p>
+          <label className="mt-4 block text-sm">金额（美元）<Input autoFocus type="number" min="0.01" step="0.01" className="mt-2" value={walletAmount} onChange={(event) => setWalletAmount(event.target.value)} /></label>
+          <label className="mt-3 block text-sm">备注（可选）<Input className="mt-2" value={walletNote} onChange={(event) => setWalletNote(event.target.value)} /></label>
+          <div className="mt-5 flex justify-end gap-2"><Button variant="outline" onClick={() => setWalletAdjust(null)}>取消</Button><Button disabled={adjustWallet.isPending} onClick={submitWalletAdjust}>{adjustWallet.isPending ? '处理中…' : '确认'}</Button></div>
+        </div>
+      </div>}
+
       <div className="mt-6 grid items-start gap-4 md:grid-cols-2">
         {filteredUsers.map((user) => {
           const wallet = user.wallet
@@ -533,7 +552,7 @@ export default function AdminUsersPage() {
                 </div>
               </summary>
 
-              <div className="absolute left-0 right-0 top-full z-30 mt-2 rounded-2xl border bg-card p-5 shadow-xl">
+              <div className="absolute left-0 right-0 top-full z-30 mt-2 rounded-2xl border border-border/80 bg-background/95 p-5 shadow-2xl backdrop-blur-xl">
                 <div className="grid gap-3 text-sm sm:grid-cols-3">
                   <div><div className="text-xs text-muted-foreground">累计充值</div><div className="mt-1 font-medium">{formatMoney(wallet?.total_added ?? 0)}</div></div>
                   <div><div className="text-xs text-muted-foreground">API 使用费用</div><div className="mt-1 font-medium">{formatMoney(wallet?.total_usage ?? 0)}</div></div>
@@ -554,8 +573,8 @@ export default function AdminUsersPage() {
                         <div className="mt-1 font-mono text-muted-foreground">{key.key_prefix}...</div>
                         <div className="mt-1 text-muted-foreground">{key.status}{key.enabled ? '' : ' · 已暂停'} · 最近使用：{formatDate(key.last_used_at)}</div>
                         <div className="mt-1 text-muted-foreground">请求 {formatNumber(key.request_count)} · Token {formatNumber(key.input_tokens + key.output_tokens)}</div>
-                        <select className="mt-2 h-8 rounded border bg-transparent px-2" value={mode} onChange={(e) => { if (e.target.value === 'custom') setRpmValues((current) => ({ ...current, [key.id]: String(key.rate_limit_rpm ?? effective) })); saveRpm(user.id, key, e.target.value) }}>
-                          <option value="default">平台默认（{effective} RPM）</option><option value="blocked">禁止调用</option><option value="custom">自定义 RPM</option>
+                        <select className="mt-2 h-8 rounded border border-input bg-background/95 px-2 text-foreground shadow-lg backdrop-blur-xl" style={{ colorScheme: 'dark' }} value={mode} onChange={(e) => { if (e.target.value === 'custom') setRpmValues((current) => ({ ...current, [key.id]: String(key.rate_limit_rpm ?? effective) })); saveRpm(user.id, key, e.target.value) }}>
+                          <option className="bg-background text-foreground" value="default">平台默认（{effective} RPM）</option><option className="bg-background text-foreground" value="blocked">禁止调用</option><option className="bg-background text-foreground" value="custom">自定义 RPM</option>
                         </select>
                         {mode === 'custom' && <div className="mt-2 flex gap-2"><Input className="h-8" type="number" min="1" max="100000" value={rpmValues[key.id] ?? String(key.rate_limit_rpm)} onChange={(e) => setRpmValues((current) => ({ ...current, [key.id]: e.target.value }))} /><Button size="xs" disabled={updateRpm.isPending} onClick={() => saveRpm(user.id, key, 'custom')}>保存</Button></div>}
                       </div>
@@ -701,10 +720,10 @@ export default function AdminUsersPage() {
                               <div className="mt-1 text-muted-foreground">{key.status}{key.enabled ? '' : ' · paused'} · Last Used: {formatDate(key.last_used_at)}</div>
                               <div className="mt-1 text-muted-foreground">Requests: {formatNumber(key.request_count)} · Tokens: {formatNumber(key.input_tokens + key.output_tokens)}</div>
                               <div className="mt-2 flex flex-wrap items-center gap-2">
-                                <select className="h-7 rounded border bg-transparent px-1" value={mode} onChange={(e) => { if (e.target.value === 'custom') setRpmValues((current) => ({ ...current, [key.id]: String(key.rate_limit_rpm ?? effective) })); saveRpm(user.id, key, e.target.value) }}>
-                                  <option value="default">使用平台默认（{effective} RPM）</option>
-                                  <option value="blocked">禁止调用</option>
-                                  <option value="custom">自定义 RPM</option>
+                                <select className="h-7 rounded border border-input bg-background/95 px-1 text-foreground shadow-lg backdrop-blur-xl" style={{ colorScheme: 'dark' }} value={mode} onChange={(e) => { if (e.target.value === 'custom') setRpmValues((current) => ({ ...current, [key.id]: String(key.rate_limit_rpm ?? effective) })); saveRpm(user.id, key, e.target.value) }}>
+                                  <option className="bg-background text-foreground" value="default">使用平台默认（{effective} RPM）</option>
+                                  <option className="bg-background text-foreground" value="blocked">禁止调用</option>
+                                  <option className="bg-background text-foreground" value="custom">自定义 RPM</option>
                                 </select>
                                 {mode === 'custom' && <><Input className="h-7 w-24" type="number" min="1" max="100000" value={rpmValues[key.id] ?? String(key.rate_limit_rpm)} onChange={(e) => setRpmValues((current) => ({ ...current, [key.id]: e.target.value }))} /><Button size="xs" disabled={updateRpm.isPending} onClick={() => saveRpm(user.id, key, 'custom')}>保存</Button></>}
                               </div>

@@ -15,6 +15,7 @@ import { generateSetupCode } from './lib/setup-code.js';
 import { warnOnEnvDrift } from './lib/env-drift.js';
 import { startPlaygroundCleanup } from './services/playground-cleanup.js';
 import { startRechargeOrderCleanup } from './services/recharge-retention.js';
+import { startModelHealthScheduler } from './services/model-health.js';
 
 async function main() {
   const config = loadConfig();
@@ -55,6 +56,7 @@ async function main() {
     console.log(`Server running on http://${display}:${PORT}`);
     console.log(`Proxy endpoint: http://${display}:${PORT}/v1/chat/completions`);
     startHealthChecker(scheduler);
+    startModelHealthScheduler(scheduler);
     startCatalogSync(scheduler);
     startDbBackupPump(getDb(), scheduler, config.dbPath ?? undefined);
 startPlaygroundCleanup(scheduler);

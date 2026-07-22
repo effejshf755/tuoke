@@ -1,70 +1,782 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useSearchParams, Link } from 'react-router-dom'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowUp, Bot, ChevronDown, Menu, MessageSquarePlus, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Search, Settings2, SlidersHorizontal, Trash2, UserCircle, X } from 'lucide-react'
-import { apiFetch, getToken } from '@/lib/api'
-import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
-import { Markdown } from '@/components/markdown'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  ArrowUp,
+  Bot,
+  ChevronDown,
+  Menu,
+  MessageSquarePlus,
+  MoreHorizontal,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Search,
+  Settings2,
+  SlidersHorizontal,
+  Trash2,
+  X,
+} from "lucide-react";
+import { apiFetch, getToken } from "@/lib/api";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { Markdown } from "@/components/markdown";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 
-type Model = { model_id: string; display_name: string; platform: string }
-type Usage = { model?: string; prompt_tokens?: number; completion_tokens?: number; total_tokens?: number; cost_micro?: number }
-type Message = { role: 'user' | 'assistant'; content: string; meta?: Usage }
-type Conversation = { id: number; title: string; modelId: string; systemPrompt?: string; updatedAt: string }
-type ConversationMessage = { role: 'user' | 'assistant'; content: string; model?: string; promptTokens?: number; completionTokens?: number; totalTokens?: number; costMicro?: number }
+type Model = { model_id: string; display_name: string; platform: string };
+type Usage = {
+  model?: string;
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+  cost_micro?: number;
+};
+type Message = { role: "user" | "assistant"; content: string; meta?: Usage };
+type Conversation = {
+  id: number;
+  title: string;
+  modelId: string;
+  systemPrompt?: string;
+  updatedAt: string;
+};
+type ConversationMessage = {
+  role: "user" | "assistant";
+  content: string;
+  model?: string;
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+  costMicro?: number;
+};
 
-const iconButton = 'inline-flex size-8 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-accent hover:text-foreground'
-function formatNumber(value?: number) { return new Intl.NumberFormat().format(Number(value ?? 0)) }
+const iconButton =
+  "inline-flex size-8 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-accent hover:text-foreground";
+function formatNumber(value?: number) {
+  return new Intl.NumberFormat().format(Number(value ?? 0));
+}
 
-function PlaygroundSidebar({ conversations, activeId, collapsed, mobileOpen, onToggle, onNew, onSelect, onDelete }: {
-  conversations: Conversation[]; activeId: number | null; collapsed: boolean; mobileOpen: boolean; onToggle: () => void; onNew: () => void; onSelect: (c: Conversation) => void; onDelete: (c: Conversation) => void
+function PlaygroundSidebar({
+  conversations,
+  activeId,
+  collapsed,
+  mobileOpen,
+  onToggle,
+  onNew,
+  onSelect,
+  onDelete,
+  onDeleteAll,
+}: {
+  conversations: Conversation[];
+  activeId: number | null;
+  collapsed: boolean;
+  mobileOpen: boolean;
+  onToggle: () => void;
+  onNew: () => void;
+  onSelect: (c: Conversation) => void;
+  onDelete: (c: Conversation) => void;
+  onDeleteAll: () => void;
 }) {
-  const [search, setSearch] = useState('')
-  const searchRef = useRef<HTMLInputElement>(null)
-  const filtered = conversations.filter(c => c.title.toLowerCase().includes(search.toLowerCase()))
+  const [search, setSearch] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
+  const filtered = conversations.filter((c) =>
+    c.title.toLowerCase().includes(search.toLowerCase()),
+  );
   const openSearch = () => {
-    if (collapsed) onToggle()
-    window.setTimeout(() => searchRef.current?.focus(), 80)
-  }
-  return <>
-    {mobileOpen && <button aria-label="关闭侧边栏" className="fixed inset-0 z-30 bg-black/50 md:hidden" onClick={onToggle} />}
-    <aside className={`fixed inset-y-0 left-0 z-40 flex flex-col border-r bg-transparent transition-[width,transform] duration-200 md:relative md:z-0 ${collapsed ? 'w-[60px]' : 'w-[270px]'} ${mobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
-      <div className={`group relative flex h-14 shrink-0 items-center ${collapsed ? 'justify-center' : 'gap-2 px-3'}`}><button className={`flex size-9 items-center justify-center rounded-lg text-foreground transition hover:bg-accent ${collapsed ? 'group-hover:opacity-0' : ''}`} aria-label="Tuoke API" onClick={collapsed ? onToggle : undefined}><span className="flex size-7 items-center justify-center rounded-lg border border-foreground/20 text-xs font-bold tracking-tight">T</span></button>{!collapsed && <span className="font-semibold tracking-tight">Tuoke API</span>}{collapsed && <button className="absolute inset-0 m-auto hidden size-9 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground group-hover:flex" onClick={onToggle} aria-label="展开侧边栏"><PanelLeftOpen className="size-5" /></button>}{!collapsed && <button className={`${iconButton} ml-auto`} onClick={onToggle} aria-label="收缩侧边栏"><PanelLeftClose className="size-4" /></button>}</div>
-      <div className={`space-y-1 px-2 ${collapsed ? 'flex flex-col items-center' : ''}`}><button onClick={onNew} className={`${iconButton} ${collapsed ? '' : 'flex w-full justify-start gap-2 px-3 text-sm'}`} aria-label="新建聊天"><MessageSquarePlus className="size-[21px]" />{!collapsed && '新建聊天'}</button><button onClick={openSearch} className={`${iconButton} ${collapsed ? '' : 'flex w-full justify-start gap-2 px-3 text-sm'}`} aria-label="搜索聊天"><Search className="size-[21px]" />{!collapsed && '搜索聊天'}</button>{!collapsed && <div className="mt-1 flex items-center gap-2 rounded-xl bg-muted/50 px-3 py-2"><Search className="size-4 text-muted-foreground" /><input ref={searchRef} value={search} onChange={e => setSearch(e.target.value)} placeholder="搜索聊天" className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground" /></div>}</div>
-      {!collapsed && <div className="min-h-0 flex-1 overflow-y-auto px-2 pt-5"><p className="px-3 pb-2 text-xs font-medium text-muted-foreground">最近</p>{filtered.length === 0 ? <p className="px-3 py-4 text-sm text-muted-foreground">暂无聊天记录</p> : filtered.map(c => <div key={c.id} className={`group flex items-center rounded-xl px-3 py-2 text-sm ${activeId === c.id ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/70 hover:text-foreground'}`}><button className="min-w-0 flex-1 truncate text-left" onClick={() => onSelect(c)}>{c.title || '新对话'}</button><DropdownMenu><DropdownMenuTrigger className="invisible ml-2 shrink-0 rounded-md p-1 group-hover:visible hover:bg-background/60" aria-label="聊天菜单"><MoreHorizontal className="size-4" /></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-32"><DropdownMenuItem variant="destructive" onClick={() => onDelete(c)}><Trash2 className="size-4" />删除聊天</DropdownMenuItem></DropdownMenuContent></DropdownMenu></div>)}</div>}
-      <div className={`mt-auto border-t ${collapsed ? 'flex justify-center p-2' : 'p-3'}`}><Link to="/user-center" className={`flex items-center gap-2 rounded-xl text-sm text-muted-foreground hover:bg-accent hover:text-foreground ${collapsed ? 'size-10 justify-center' : 'px-2 py-2'}`}><UserCircle className="size-[22px]" />{!collapsed && '账户中心'}</Link></div>
-    </aside>
-  </>
+    if (collapsed) onToggle();
+    window.setTimeout(() => searchRef.current?.focus(), 80);
+  };
+  return (
+    <>
+      {mobileOpen && (
+        <button
+          aria-label="关闭侧边栏"
+          className="fixed inset-0 z-30 bg-black/50 md:hidden"
+          onClick={onToggle}
+        />
+      )}
+      <aside
+        className={`fixed inset-y-0 left-0 z-40 flex flex-col border-r bg-transparent transition-[width,transform] duration-200 md:relative md:z-0 ${collapsed ? "w-[60px]" : "w-[270px]"} ${mobileOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}
+      >
+        <div
+          className={`group relative flex h-14 shrink-0 items-center ${collapsed ? "justify-center" : "gap-2 px-3"}`}
+        >
+          <button
+            className={`flex size-9 items-center justify-center rounded-lg text-foreground transition hover:bg-accent ${collapsed ? "group-hover:opacity-0" : ""}`}
+            aria-label="Tuoke API"
+            onClick={collapsed ? onToggle : undefined}
+          >
+            <span className="flex size-7 items-center justify-center rounded-lg border border-foreground/20 text-xs font-bold tracking-tight">
+              T
+            </span>
+          </button>
+          {!collapsed && (
+            <span className="font-semibold tracking-tight">Tuoke API</span>
+          )}
+          {collapsed && (
+            <button
+              className="absolute inset-0 m-auto hidden size-9 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground group-hover:flex"
+              onClick={onToggle}
+              aria-label="展开侧边栏"
+            >
+              <PanelLeftOpen className="size-5" />
+            </button>
+          )}
+          {!collapsed && (
+            <button
+              className={`${iconButton} ml-auto`}
+              onClick={onToggle}
+              aria-label="收缩侧边栏"
+            >
+              <PanelLeftClose className="size-4" />
+            </button>
+          )}
+        </div>
+        <div
+          className={`space-y-1 px-2 ${collapsed ? "flex flex-col items-center" : ""}`}
+        >
+          <button
+            onClick={onNew}
+            className={`${iconButton} ${collapsed ? "" : "flex w-full justify-start gap-2 px-3 text-sm"}`}
+            aria-label="新建聊天"
+          >
+            <MessageSquarePlus className="size-[21px]" />
+            {!collapsed && "新建聊天"}
+          </button>
+          <button
+            onClick={openSearch}
+            className={`${iconButton} ${collapsed ? "" : "flex w-full justify-start gap-2 px-3 text-sm"}`}
+            aria-label="搜索聊天"
+          >
+            <Search className="size-[21px]" />
+            {!collapsed && "搜索聊天"}
+          </button>
+          {!collapsed && (
+            <div className="mt-1 flex items-center gap-2 rounded-xl bg-muted/50 px-3 py-2">
+              <Search className="size-4 text-muted-foreground" />
+              <input
+                ref={searchRef}
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="搜索聊天"
+                className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+              />
+            </div>
+          )}
+        </div>
+        {!collapsed && (
+          <div className="min-h-0 flex-1 overflow-y-auto px-2 pt-5">
+            <p className="px-3 pb-2 text-xs font-medium text-muted-foreground">
+              最近
+            </p>
+            {filtered.length === 0 ? (
+              <p className="px-3 py-4 text-sm text-muted-foreground">
+                暂无聊天记录
+              </p>
+            ) : (
+              filtered.map((c) => (
+                <div
+                  key={c.id}
+                  className={`group flex items-center rounded-xl px-3 py-2 text-sm ${activeId === c.id ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent/70 hover:text-foreground"}`}
+                >
+                  <button
+                    className="min-w-0 flex-1 truncate text-left"
+                    onClick={() => onSelect(c)}
+                  >
+                    {c.title || "新对话"}
+                  </button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger
+                      className="invisible ml-2 shrink-0 rounded-md p-1 group-hover:visible hover:bg-background/60"
+                      aria-label="聊天菜单"
+                    >
+                      <MoreHorizontal className="size-4" />
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-32">
+                      <DropdownMenuItem
+                        variant="destructive"
+                        onClick={() => onDelete(c)}
+                      >
+                        <Trash2 className="size-4" />
+                        删除聊天
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+        <div
+          className={`mt-auto border-t ${collapsed ? "flex justify-center p-2" : "p-3"}`}
+        >
+          <button
+            type="button"
+            onClick={onDeleteAll}
+            disabled={conversations.length === 0}
+            className={`flex items-center gap-2 rounded-xl text-sm text-muted-foreground transition hover:bg-destructive/10 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-40 ${collapsed ? "size-10 justify-center" : "w-full px-2 py-2"}`}
+            aria-label="清空全部聊天"
+          >
+            <Trash2 className="size-[22px]" />
+            {!collapsed && "清空全部聊天"}
+          </button>
+        </div>
+      </aside>
+    </>
+  );
 }
 
-function MessageList({ messages, bottomRef }: { messages: Message[]; bottomRef: React.RefObject<HTMLDivElement | null> }) {
-  return <div className="mx-auto w-full max-w-4xl space-y-7 px-4 py-8 sm:px-8">{messages.length === 0 ? <div className="flex min-h-[55vh] flex-col items-center justify-center text-center"><div className="mb-4 flex size-14 items-center justify-center rounded-2xl border bg-transparent"><Bot className="size-7 text-muted-foreground" /></div><h1 className="text-2xl font-semibold">开始一段新对话</h1><p className="mt-2 text-sm text-muted-foreground">选择模型后，输入消息开始测试 Tuoke API。</p></div> : messages.map((m, i) => <div key={`${m.role}-${i}`} className={`flex gap-3 ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}><div className={`max-w-[min(85%,720px)] rounded-2xl border bg-transparent px-4 py-3 text-sm leading-6 text-foreground ${m.role === 'user' ? 'border-foreground/30' : 'border-foreground/15'}`}>{m.role === 'assistant' ? <Markdown>{m.content || ' '}</Markdown> : <p className="whitespace-pre-wrap">{m.content}</p>}{m.meta && <div className="mt-3 border-t border-border/60 pt-2 text-[11px] text-muted-foreground">Token {formatNumber(m.meta.total_tokens)} · {m.meta.model ?? '模型'}</div>}</div></div>)}<div ref={bottomRef} /></div>
+function MessageList({
+  messages,
+  bottomRef,
+}: {
+  messages: Message[];
+  bottomRef: React.RefObject<HTMLDivElement | null>;
+}) {
+  return (
+    <div className="mx-auto w-full max-w-4xl space-y-7 px-4 py-8 sm:px-8">
+      {messages.length === 0 ? (
+        <div className="flex min-h-[55vh] flex-col items-center justify-center text-center">
+          <div className="mb-4 flex size-14 items-center justify-center rounded-2xl border bg-transparent">
+            <Bot className="size-7 text-muted-foreground" />
+          </div>
+          <h1 className="text-2xl font-semibold">开始一段新对话</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            选择模型后，输入消息开始测试 Tuoke API。
+          </p>
+        </div>
+      ) : (
+        messages.map((m, i) => (
+          <div
+            key={`${m.role}-${i}`}
+            className={`flex gap-3 ${m.role === "user" ? "justify-end" : "justify-start"}`}
+          >
+            <div
+              className={`max-w-[min(85%,720px)] rounded-2xl border bg-transparent px-4 py-3 text-sm leading-6 text-foreground ${m.role === "user" ? "border-foreground/30" : "border-foreground/15"}`}
+            >
+              {m.role === "assistant" ? (
+                <Markdown>{m.content || " "}</Markdown>
+              ) : (
+                <p className="whitespace-pre-wrap">{m.content}</p>
+              )}
+              {m.meta && (
+                <div className="mt-3 border-t border-border/60 pt-2 text-[11px] text-muted-foreground">
+                  Token {formatNumber(m.meta.total_tokens)} ·{" "}
+                  {m.meta.model ?? "模型"}
+                </div>
+              )}
+            </div>
+          </div>
+        ))
+      )}
+      <div ref={bottomRef} />
+    </div>
+  );
 }
 
-function LegacyComposer({ input, setInput, model, setModel, models, systemPrompt, setSystemPrompt, sending, onSend }: { input: string; setInput: (v: string) => void; model: string; setModel: (v: string) => void; models: Model[]; systemPrompt: string; setSystemPrompt: (v: string) => void; sending: boolean; onSend: () => void }) {
-  const ref = useRef<HTMLTextAreaElement>(null)
-  useEffect(() => { const el = ref.current; if (el) { el.style.height = 'auto'; el.style.height = `${Math.min(Math.max(el.scrollHeight, 48), 220)}px` } }, [input])
-  return <div className="sticky bottom-0 mx-auto w-full max-w-4xl bg-transparent px-4 pb-4 pt-2 sm:px-8"><div className="rounded-3xl border bg-transparent p-2 shadow-none"><Textarea ref={ref} value={input} disabled={sending} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); onSend() } }} placeholder="输入消息…（Enter 发送，Shift + Enter 换行）" rows={1} className="max-h-[220px] min-h-12 resize-none overflow-y-auto border-0 bg-transparent px-3 py-2 text-sm shadow-none focus-visible:ring-0" /><div className="flex items-center gap-1 px-1 pt-1"><Popover><PopoverTrigger className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium hover:bg-accent ${systemPrompt ? 'text-primary' : 'text-muted-foreground'}`}><Settings2 className="size-3.5" />系统提示{systemPrompt && ' •'}</PopoverTrigger><PopoverContent align="start" className="w-80"><div className="mb-2 flex items-center justify-between"><span className="text-sm font-medium">系统提示（可选）</span>{systemPrompt && <button className="text-xs text-muted-foreground hover:text-foreground" onClick={() => setSystemPrompt('')}>清空</button>}</div><Textarea autoFocus value={systemPrompt} onChange={e => setSystemPrompt(e.target.value)} placeholder="例如：你是一个简洁、专业的 AI 助手。" className="min-h-24 resize-y" /></PopoverContent></Popover><DropdownMenu><DropdownMenuTrigger className="flex max-w-52 items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent"><span className="truncate">{models.find(m => m.model_id === model)?.display_name ?? '自动'}</span><ChevronDown className="size-3.5 shrink-0" /></DropdownMenuTrigger><DropdownMenuContent align="start" className="max-h-72 w-64">{models.map(m => <DropdownMenuItem key={m.model_id} onClick={() => setModel(m.model_id)} className={m.model_id === model ? 'bg-accent' : ''}>{m.display_name}<span className="ml-auto text-[11px] text-muted-foreground">{m.model_id}</span></DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu><Button className="ml-auto rounded-xl" size="sm" onClick={onSend} disabled={sending || !input.trim() || !model}>{sending ? '生成中…' : '发送'}</Button></div></div></div>
+function LegacyComposer({
+  input,
+  setInput,
+  model,
+  setModel,
+  models,
+  systemPrompt,
+  setSystemPrompt,
+  sending,
+  onSend,
+}: {
+  input: string;
+  setInput: (v: string) => void;
+  model: string;
+  setModel: (v: string) => void;
+  models: Model[];
+  systemPrompt: string;
+  setSystemPrompt: (v: string) => void;
+  sending: boolean;
+  onSend: () => void;
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (el) {
+      el.style.height = "auto";
+      el.style.height = `${Math.min(Math.max(el.scrollHeight, 48), 220)}px`;
+    }
+  }, [input]);
+  return (
+    <div className="sticky bottom-0 mx-auto w-full max-w-4xl bg-transparent px-4 pb-4 pt-2 sm:px-8">
+      <div className="rounded-3xl border bg-transparent p-2 shadow-none">
+        <Textarea
+          ref={ref}
+          value={input}
+          disabled={sending}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (
+              e.key === "Enter" &&
+              !e.shiftKey &&
+              !e.nativeEvent.isComposing
+            ) {
+              e.preventDefault();
+              onSend();
+            }
+          }}
+          placeholder="输入消息…（Enter 发送，Shift + Enter 换行）"
+          rows={1}
+          className="max-h-[220px] min-h-12 resize-none overflow-y-auto border-0 bg-transparent px-3 py-2 text-sm shadow-none focus-visible:ring-0"
+        />
+        <div className="flex items-center gap-1 px-1 pt-1">
+          <Popover>
+            <PopoverTrigger
+              className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium hover:bg-accent ${systemPrompt ? "text-primary" : "text-muted-foreground"}`}
+            >
+              <Settings2 className="size-3.5" />
+              系统提示{systemPrompt && " •"}
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-80">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-sm font-medium">系统提示（可选）</span>
+                {systemPrompt && (
+                  <button
+                    className="text-xs text-muted-foreground hover:text-foreground"
+                    onClick={() => setSystemPrompt("")}
+                  >
+                    清空
+                  </button>
+                )}
+              </div>
+              <Textarea
+                autoFocus
+                value={systemPrompt}
+                onChange={(e) => setSystemPrompt(e.target.value)}
+                placeholder="例如：你是一个简洁、专业的 AI 助手。"
+                className="min-h-24 resize-y"
+              />
+            </PopoverContent>
+          </Popover>
+          <DropdownMenu>
+            <DropdownMenuTrigger className="flex max-w-52 items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent">
+              <span className="truncate">
+                {models.find((m) => m.model_id === model)?.display_name ??
+                  "自动"}
+              </span>
+              <ChevronDown className="size-3.5 shrink-0" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="max-h-72 w-64">
+              {models.map((m) => (
+                <DropdownMenuItem
+                  key={m.model_id}
+                  onClick={() => setModel(m.model_id)}
+                  className={m.model_id === model ? "bg-accent" : ""}
+                >
+                  {m.display_name}
+                  <span className="ml-auto text-[11px] text-muted-foreground">
+                    {m.model_id}
+                  </span>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Button
+            className="ml-auto rounded-xl"
+            size="sm"
+            onClick={onSend}
+            disabled={sending || !input.trim() || !model}
+          >
+            {sending ? "生成中…" : "发送"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
-function Composer({ input, setInput, model, setModel, models, systemPrompt, setSystemPrompt, sending, onSend }: Parameters<typeof LegacyComposer>[0]) {
-  const ref = useRef<HTMLTextAreaElement>(null)
-  useEffect(() => { const el = ref.current; if (el) { el.style.height = 'auto'; el.style.height = `${Math.min(Math.max(el.scrollHeight, 48), 220)}px` } }, [input])
-  return <div className="sticky bottom-0 mx-auto w-full max-w-4xl bg-transparent px-4 pb-4 pt-2 sm:px-8"><div className="relative rounded-3xl border bg-transparent p-2 shadow-none"><Textarea ref={ref} value={input} disabled={sending} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); onSend() } }} placeholder="输入消息..." rows={1} className="max-h-[220px] min-h-12 resize-none overflow-y-auto border-0 bg-transparent px-3 py-2 pr-36 text-sm shadow-none focus-visible:ring-0" /><div className="absolute bottom-2 right-2 flex items-center gap-1"><Popover><PopoverTrigger aria-label="系统提示" className={`relative flex size-8 items-center justify-center rounded-lg hover:bg-accent ${systemPrompt ? 'text-primary' : 'text-muted-foreground'}`}><SlidersHorizontal className="size-4" />{systemPrompt && <span className="absolute right-1 top-1 size-1.5 rounded-full bg-primary" />}</PopoverTrigger><PopoverContent align="end" className="w-80"><Textarea autoFocus value={systemPrompt} onChange={e => setSystemPrompt(e.target.value)} className="min-h-24 resize-y" /></PopoverContent></Popover><DropdownMenu><DropdownMenuTrigger className="flex max-w-32 items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent"><span className="truncate">{models.find(m => m.model_id === model)?.display_name ?? '自动'}</span><ChevronDown className="size-3.5 shrink-0" /></DropdownMenuTrigger><DropdownMenuContent align="end" className="max-h-72 w-64">{models.map(m => <DropdownMenuItem key={m.model_id} onClick={() => setModel(m.model_id)}>{m.display_name}</DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu><Button aria-label="发送" className="size-8 rounded-full p-0" onClick={onSend} disabled={sending || !input.trim() || !model}><ArrowUp className="size-4" /></Button></div></div></div>
+function Composer({
+  input,
+  setInput,
+  model,
+  setModel,
+  models,
+  systemPrompt,
+  setSystemPrompt,
+  sending,
+  onSend,
+}: Parameters<typeof LegacyComposer>[0]) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (el) {
+      el.style.height = "auto";
+      el.style.height = `${Math.min(Math.max(el.scrollHeight, 48), 220)}px`;
+    }
+  }, [input]);
+  return (
+    <div className="sticky bottom-0 mx-auto w-full max-w-4xl bg-transparent px-4 pb-4 pt-2 sm:px-8">
+      <div className="relative rounded-3xl border bg-transparent p-2 shadow-none">
+        <Textarea
+          ref={ref}
+          value={input}
+          disabled={sending}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (
+              e.key === "Enter" &&
+              !e.shiftKey &&
+              !e.nativeEvent.isComposing
+            ) {
+              e.preventDefault();
+              onSend();
+            }
+          }}
+          placeholder="输入消息..."
+          rows={1}
+          className="max-h-[220px] min-h-12 resize-none overflow-y-auto border-0 bg-transparent px-3 py-2 pr-36 text-sm shadow-none focus-visible:ring-0"
+        />
+        <div className="absolute bottom-2 right-2 flex items-center gap-1">
+          <Popover>
+            <PopoverTrigger
+              aria-label="系统提示"
+              className={`relative flex size-8 items-center justify-center rounded-lg hover:bg-accent ${systemPrompt ? "text-primary" : "text-muted-foreground"}`}
+            >
+              <SlidersHorizontal className="size-4" />
+              {systemPrompt && (
+                <span className="absolute right-1 top-1 size-1.5 rounded-full bg-primary" />
+              )}
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-80">
+              <Textarea
+                autoFocus
+                value={systemPrompt}
+                onChange={(e) => setSystemPrompt(e.target.value)}
+                className="min-h-24 resize-y"
+              />
+            </PopoverContent>
+          </Popover>
+          <DropdownMenu>
+            <DropdownMenuTrigger className="flex max-w-32 items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent">
+              <span className="truncate">
+                {models.find((m) => m.model_id === model)?.display_name ??
+                  "自动"}
+              </span>
+              <ChevronDown className="size-3.5 shrink-0" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="max-h-72 w-64">
+              {models.map((m) => (
+                <DropdownMenuItem
+                  key={m.model_id}
+                  onClick={() => setModel(m.model_id)}
+                >
+                  {m.display_name}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Button
+            aria-label="发送"
+            className="size-8 rounded-full p-0"
+            onClick={onSend}
+            disabled={sending || !input.trim() || !model}
+          >
+            <ArrowUp className="size-4" />
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default function PlaygroundPage() {
-  const [searchParams] = useSearchParams(); const [model, setModel] = useState('auto'); const [systemPrompt, setSystemPrompt] = useState(''); const [input, setInput] = useState(''); const [messages, setMessages] = useState<Message[]>([]); const [error, setError] = useState(''); const [sending, setSending] = useState(false); const [conversationId, setConversationId] = useState<number | null>(null); const [collapsed, setCollapsed] = useState(() => localStorage.getItem('playground-sidebar') === 'collapsed'); const [mobileOpen, setMobileOpen] = useState(false); const [loadingConversation, setLoadingConversation] = useState(false); const bottomRef = useRef<HTMLDivElement>(null); const requestRef = useRef(0)
-  const queryClient = useQueryClient()
-  const models = useQuery<{ models: Model[] }>({ queryKey: ['user-models'], queryFn: () => apiFetch('/api/user/models') }); const conversations = useQuery<{ conversations: Conversation[] }>({ queryKey: ['playground-conversations'], queryFn: () => apiFetch('/api/user/playground/conversations') }); const conversationMessages = useQuery<{ messages: ConversationMessage[] }>({ queryKey: ['playground-conversation-messages', conversationId], queryFn: () => apiFetch(`/api/user/playground/conversations/${conversationId}/messages`), enabled: conversationId !== null }); const usableModels = useMemo(() => models.data?.models ?? [], [models.data?.models])
-  useEffect(() => { const requested = searchParams.get('model'); if (requested && usableModels.some(m => m.model_id === requested)) setModel(requested); else if (usableModels.length && !usableModels.some(m => m.model_id === model)) setModel('auto') }, [searchParams, usableModels, model])
-  useEffect(() => { if (!conversationMessages.data || conversationId === null || sending) return; setMessages(conversationMessages.data.messages.map(m => ({ role: m.role, content: m.content, meta: m.role === 'assistant' ? { model: m.model, prompt_tokens: m.promptTokens, completion_tokens: m.completionTokens, total_tokens: m.totalTokens, cost_micro: m.costMicro } : undefined }))) }, [conversationMessages.data, conversationId, sending])
-  useEffect(() => { if (messages.length && !loadingConversation) bottomRef.current?.scrollIntoView({ behavior: sending ? 'smooth' : 'auto' }) }, [messages, loadingConversation, sending])
-  const reset = useCallback(() => { requestRef.current++; setConversationId(null); setMessages([]); setSystemPrompt(''); setInput(''); setError(''); setMobileOpen(false) }, [])
-  async function selectConversation(c: Conversation) { if (sending) return; setLoadingConversation(true); setConversationId(c.id); setModel(c.modelId); setSystemPrompt(c.systemPrompt ?? ''); setError(''); setMobileOpen(false); await conversationMessages.refetch(); setLoadingConversation(false) }
-  async function removeConversation(c: Conversation) { if (!window.confirm('确定删除这条聊天记录吗？')) return; try { await apiFetch(`/api/user/playground/conversations/${c.id}`, { method: 'DELETE' }); if (conversationId === c.id) reset(); await conversations.refetch() } catch (e) { setError((e as Error).message) } }
-  async function send() { const text = input.trim(); if (!text || !model || sending) return; const requestId = ++requestRef.current; const next = [...messages, { role: 'user' as const, content: text }]; setMessages([...next, { role: 'assistant', content: '' }]); setInput(''); setError(''); setSending(true); try { let active = conversationId; if (active === null) { const created = await apiFetch<{ id: number }>('/api/user/playground/conversations', { method: 'POST', body: JSON.stringify({ model, systemPrompt }) }); active = created.id; setConversationId(active) } await apiFetch(`/api/user/playground/conversations/${active}/messages`, { method: 'POST', body: JSON.stringify({ role: 'user', content: text }) }); const token = getToken(); const response = await fetch('/api/user/playground/chat/stream', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify({ model, messages: [...(systemPrompt.trim() ? [{ role: 'system', content: systemPrompt.trim() }] : []), ...next] }) }); if (!response.ok) throw new Error((await response.json().catch(() => null))?.error?.message ?? `HTTP ${response.status}`); if (!response.body) throw new Error('流式响应内容为空'); const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = ''; let assistantText = ''; while (true) { const { done, value } = await reader.read(); if (done) break; buffer += decoder.decode(value, { stream: true }); const parts = buffer.split('\n\n'); buffer = parts.pop() ?? ''; for (const part of parts) for (const line of part.split('\n')) { if (!line.startsWith('data:')) continue; const data = line.slice(5).trim(); if (!data || data === '[DONE]') continue; const chunk = JSON.parse(data); if (chunk.error) throw new Error(chunk.error.message ?? '流式响应出错'); const content = chunk.choices?.[0]?.delta?.content; if (typeof content === 'string') { assistantText += content; if (requestRef.current === requestId) setMessages([...next, { role: 'assistant', content: assistantText }]) } } } if (assistantText.trim()) await apiFetch(`/api/user/playground/conversations/${active}/messages`, { method: 'POST', body: JSON.stringify({ role: 'assistant', content: assistantText }) }); await queryClient.refetchQueries({ queryKey: ['playground-conversation-messages', active] }); await conversations.refetch() } catch (e) { if (requestRef.current === requestId) setError((e as Error).message) } finally { if (requestRef.current === requestId) setSending(false) } }
-  return <div className="-mx-6 -my-8 flex h-[calc(100vh-65px)] min-h-[620px] overflow-hidden bg-transparent"><PlaygroundSidebar conversations={conversations.data?.conversations ?? []} activeId={conversationId} collapsed={collapsed} mobileOpen={mobileOpen} onToggle={() => { const next = !collapsed; setCollapsed(next); localStorage.setItem('playground-sidebar', next ? 'collapsed' : 'expanded'); setMobileOpen(false) }} onNew={reset} onSelect={selectConversation} onDelete={removeConversation} /><main className="flex min-w-0 flex-1 flex-col bg-transparent"><header className="flex h-14 shrink-0 items-center border-b bg-transparent px-4 sm:px-8"><button className={`${iconButton} mr-2 md:hidden`} onClick={() => setMobileOpen(true)} aria-label="打开侧边栏"><Menu className="size-5" /></button><div className="flex items-center gap-2 text-sm font-medium">{usableModels.find(m => m.model_id === model)?.display_name ?? '自动'}<span className="text-xs text-muted-foreground">· Playground</span></div><button className={`${iconButton} ml-auto md:hidden`} onClick={() => setMobileOpen(false)}><X className="size-4" /></button></header><div className="min-h-0 flex-1 overflow-y-auto">{loadingConversation ? <p className="py-20 text-center text-sm text-muted-foreground">正在加载聊天…</p> : <MessageList messages={messages} bottomRef={bottomRef} />}</div>{error && <p className="mx-auto mb-2 w-full max-w-4xl px-4 text-sm text-destructive sm:px-8">{error}</p>}<Composer input={input} setInput={setInput} model={model} setModel={setModel} models={usableModels} systemPrompt={systemPrompt} setSystemPrompt={setSystemPrompt} sending={sending} onSend={() => void send()} /></main></div>
+  const [searchParams] = useSearchParams();
+  const [model, setModel] = useState("auto");
+  const [systemPrompt, setSystemPrompt] = useState("");
+  const [input, setInput] = useState("");
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [error, setError] = useState("");
+  const [sending, setSending] = useState(false);
+  const [conversationId, setConversationId] = useState<number | null>(null);
+  const [collapsed, setCollapsed] = useState(
+    () => localStorage.getItem("playground-sidebar") === "collapsed",
+  );
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [loadingConversation, setLoadingConversation] = useState(false);
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const requestRef = useRef(0);
+  const queryClient = useQueryClient();
+  const models = useQuery<{ models: Model[] }>({
+    queryKey: ["user-models"],
+    queryFn: () => apiFetch("/api/user/models"),
+  });
+  const conversations = useQuery<{ conversations: Conversation[] }>({
+    queryKey: ["playground-conversations"],
+    queryFn: () => apiFetch("/api/user/playground/conversations"),
+  });
+  const conversationMessages = useQuery<{ messages: ConversationMessage[] }>({
+    queryKey: ["playground-conversation-messages", conversationId],
+    queryFn: () =>
+      apiFetch(`/api/user/playground/conversations/${conversationId}/messages`),
+    enabled: conversationId !== null,
+  });
+  const usableModels = useMemo(
+    () => models.data?.models ?? [],
+    [models.data?.models],
+  );
+  useEffect(() => {
+    const requested = searchParams.get("model");
+    if (requested && usableModels.some((m) => m.model_id === requested))
+      setModel(requested);
+    else if (
+      usableModels.length &&
+      !usableModels.some((m) => m.model_id === model)
+    )
+      setModel("auto");
+    else if (!usableModels.length) setModel("");
+  }, [searchParams, usableModels, model]);
+  useEffect(() => {
+    if (!conversationMessages.data || conversationId === null || sending)
+      return;
+    setMessages(
+      conversationMessages.data.messages.map((m) => ({
+        role: m.role,
+        content: m.content,
+        meta:
+          m.role === "assistant"
+            ? {
+                model: m.model,
+                prompt_tokens: m.promptTokens,
+                completion_tokens: m.completionTokens,
+                total_tokens: m.totalTokens,
+                cost_micro: m.costMicro,
+              }
+            : undefined,
+      })),
+    );
+  }, [conversationMessages.data, conversationId, sending]);
+  useEffect(() => {
+    if (messages.length && !loadingConversation)
+      bottomRef.current?.scrollIntoView({
+        behavior: sending ? "smooth" : "auto",
+      });
+  }, [messages, loadingConversation, sending]);
+  const reset = useCallback(() => {
+    requestRef.current++;
+    setConversationId(null);
+    setMessages([]);
+    setSystemPrompt("");
+    setInput("");
+    setError("");
+    setMobileOpen(false);
+  }, []);
+  async function selectConversation(c: Conversation) {
+    if (sending) return;
+    setLoadingConversation(true);
+    setConversationId(c.id);
+    setModel(c.modelId);
+    setSystemPrompt(c.systemPrompt ?? "");
+    setError("");
+    setMobileOpen(false);
+    await conversationMessages.refetch();
+    setLoadingConversation(false);
+  }
+  async function removeConversation(c: Conversation) {
+    if (!window.confirm("确定删除这条聊天记录吗？")) return;
+    try {
+      await apiFetch(`/api/user/playground/conversations/${c.id}`, {
+        method: "DELETE",
+      });
+      if (conversationId === c.id) reset();
+      await conversations.refetch();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  async function removeAllConversations() {
+    if (
+      !conversations.data?.conversations.length ||
+      !window.confirm("确定清空全部聊天记录吗？此操作无法撤销。")
+    )
+      return;
+    try {
+      await apiFetch("/api/user/playground/conversations", {
+        method: "DELETE",
+      });
+      reset();
+      await conversations.refetch();
+      queryClient.removeQueries({
+        queryKey: ["playground-conversation-messages"],
+      });
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  async function send() {
+    const text = input.trim();
+    if (!text || !model || sending) return;
+    const requestId = ++requestRef.current;
+    const next = [...messages, { role: "user" as const, content: text }];
+    setMessages([...next, { role: "assistant", content: "" }]);
+    setInput("");
+    setError("");
+    setSending(true);
+    try {
+      let active = conversationId;
+      if (active === null) {
+        const created = await apiFetch<{ id: number }>(
+          "/api/user/playground/conversations",
+          { method: "POST", body: JSON.stringify({ model, systemPrompt }) },
+        );
+        active = created.id;
+        setConversationId(active);
+      }
+      await apiFetch(`/api/user/playground/conversations/${active}/messages`, {
+        method: "POST",
+        body: JSON.stringify({ role: "user", content: text }),
+      });
+      const token = getToken();
+      const response = await fetch("/api/user/playground/chat/stream", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            ...(systemPrompt.trim()
+              ? [{ role: "system", content: systemPrompt.trim() }]
+              : []),
+            ...next,
+          ],
+        }),
+      });
+      if (!response.ok)
+        throw new Error(
+          (await response.json().catch(() => null))?.error?.message ??
+            `HTTP ${response.status}`,
+        );
+      if (!response.body) throw new Error("流式响应内容为空");
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let assistantText = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() ?? "";
+        for (const part of parts)
+          for (const line of part.split("\n")) {
+            if (!line.startsWith("data:")) continue;
+            const data = line.slice(5).trim();
+            if (!data || data === "[DONE]") continue;
+            const chunk = JSON.parse(data);
+            if (chunk.error)
+              throw new Error(chunk.error.message ?? "流式响应出错");
+            const content = chunk.choices?.[0]?.delta?.content;
+            if (typeof content === "string") {
+              assistantText += content;
+              if (requestRef.current === requestId)
+                setMessages([
+                  ...next,
+                  { role: "assistant", content: assistantText },
+                ]);
+            }
+          }
+      }
+      if (assistantText.trim())
+        await apiFetch(
+          `/api/user/playground/conversations/${active}/messages`,
+          {
+            method: "POST",
+            body: JSON.stringify({ role: "assistant", content: assistantText }),
+          },
+        );
+      await queryClient.refetchQueries({
+        queryKey: ["playground-conversation-messages", active],
+      });
+      await conversations.refetch();
+    } catch (e) {
+      if (requestRef.current === requestId) setError((e as Error).message);
+    } finally {
+      if (requestRef.current === requestId) setSending(false);
+    }
+  }
+  return (
+    <div className="-mx-6 -my-8 flex h-[calc(100vh-65px)] min-h-[620px] overflow-hidden bg-transparent">
+      <PlaygroundSidebar
+        conversations={conversations.data?.conversations ?? []}
+        activeId={conversationId}
+        collapsed={collapsed}
+        mobileOpen={mobileOpen}
+        onToggle={() => {
+          const next = !collapsed;
+          setCollapsed(next);
+          localStorage.setItem(
+            "playground-sidebar",
+            next ? "collapsed" : "expanded",
+          );
+          setMobileOpen(false);
+        }}
+        onNew={reset}
+        onSelect={selectConversation}
+        onDelete={removeConversation}
+        onDeleteAll={() => void removeAllConversations()}
+      />
+      <main className="flex min-w-0 flex-1 flex-col bg-transparent">
+        <header className="flex h-14 shrink-0 items-center border-b bg-transparent px-4 sm:px-8">
+          <button
+            className={`${iconButton} mr-2 md:hidden`}
+            onClick={() => setMobileOpen(true)}
+            aria-label="打开侧边栏"
+          >
+            <Menu className="size-5" />
+          </button>
+          <div className="flex items-center gap-2 text-sm font-medium">
+            {usableModels.find((m) => m.model_id === model)?.display_name ??
+              "自动"}
+            <span className="text-xs text-muted-foreground">· Playground</span>
+          </div>
+          <button
+            className={`${iconButton} ml-auto md:hidden`}
+            onClick={() => setMobileOpen(false)}
+          >
+            <X className="size-4" />
+          </button>
+        </header>
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          {loadingConversation ? (
+            <p className="py-20 text-center text-sm text-muted-foreground">
+              正在加载聊天…
+            </p>
+          ) : (
+            <MessageList messages={messages} bottomRef={bottomRef} />
+          )}
+        </div>
+        {error && (
+          <p className="mx-auto mb-2 w-full max-w-4xl px-4 text-sm text-destructive sm:px-8">
+            {error}
+          </p>
+        )}
+        <Composer
+          input={input}
+          setInput={setInput}
+          model={model}
+          setModel={setModel}
+          models={usableModels}
+          systemPrompt={systemPrompt}
+          setSystemPrompt={setSystemPrompt}
+          sending={sending}
+          onSend={() => void send()}
+        />
+      </main>
+    </div>
+  );
 }

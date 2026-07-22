@@ -413,7 +413,8 @@ export default function AdminBillingPage() {
               event.target.value as BillingFilter,
             )
           }
-          className="h-9 rounded-md border border-input bg-transparent px-3 text-sm text-foreground"
+          className="h-9 rounded-md border border-input bg-background/85 px-3 text-sm text-foreground backdrop-blur-md"
+          style={{ colorScheme: 'dark' }}
           aria-label="Billing model filter"
         >
           <option value="all">All models</option>
@@ -465,11 +466,11 @@ export default function AdminBillingPage() {
                 {expanded ? '收起编辑' : '编辑收费'}
               </Button>
               {expanded && (
-                <div className="absolute left-0 right-0 top-full z-30 mt-2 grid gap-3 rounded-2xl border bg-card p-5 shadow-xl">
+              <div className="absolute left-0 right-0 top-full z-30 mt-2 grid gap-3 rounded-2xl border border-border/80 bg-background/95 p-5 shadow-2xl backdrop-blur-xl">
                   <label className="grid gap-1 text-xs text-muted-foreground">输入价格 / 1M<Input type="number" min="0" step="0.000001" value={model.editInputPrice} onChange={(event) => updateEdit(model.id, { editInputPrice: event.target.value })} /></label>
                   <label className="grid gap-1 text-xs text-muted-foreground">输出价格 / 1M<Input type="number" min="0" step="0.000001" value={model.editOutputPrice} onChange={(event) => updateEdit(model.id, { editOutputPrice: event.target.value })} /></label>
                   <label className="grid gap-1 text-xs text-muted-foreground">倍率<Input type="number" min="0" step="0.001" value={model.editMultiplier} onChange={(event) => updateEdit(model.id, { editMultiplier: event.target.value })} /></label>
-                  <label className="grid gap-1 text-xs text-muted-foreground">计费状态<select className="h-9 rounded-md border border-input bg-transparent px-3 text-sm text-foreground" value={model.editBillingEnabled ? 'enabled' : 'disabled'} onChange={(event) => updateEdit(model.id, { editBillingEnabled: event.target.value === 'enabled' })}><option value="enabled">启用计费</option><option value="disabled">停用计费</option></select></label>
+                  <label className="grid gap-1 text-xs text-muted-foreground">计费状态<select className="h-9 rounded-md border border-input bg-background/85 px-3 text-sm text-foreground backdrop-blur-md" style={{ colorScheme: 'dark' }} value={model.editBillingEnabled ? 'enabled' : 'disabled'} onChange={(event) => updateEdit(model.id, { editBillingEnabled: event.target.value === 'enabled' })}><option value="enabled">启用计费</option><option value="disabled">停用计费</option></select></label>
                   <Button disabled={saveBilling.isPending} onClick={() => saveBilling.mutate(model)}>{saveBilling.isPending ? '保存中...' : '保存收费设置'}</Button>
                 </div>
               )}

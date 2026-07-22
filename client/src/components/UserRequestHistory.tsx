@@ -2,11 +2,12 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { apiFetch } from '@/lib/api'
 import { Input } from '@/components/ui/input'
+import { formatBeijingDateTime } from '@/lib/utils'
 
 type RequestRow = { id: number; createdAt: string; apiKeyName: string; requestedModel: string | null; routedModel: string; platform: string; status: string; inputTokens: number; outputTokens: number; totalTokens: number; billingAmountMicro: number; latencyMs: number }
 type Response = { requests: RequestRow[]; pagination: { page: number; pages: number; total: number } }
 type ApiKey = { id: number; name: string }
-const date = (value: string) => new Date(value).toLocaleString()
+const date = (value: string) => formatBeijingDateTime(value)
 
 export default function UserRequestHistory() {
   const [page, setPage] = useState(1), [model, setModel] = useState(''), [status, setStatus] = useState(''), [apiKey, setApiKey] = useState('')

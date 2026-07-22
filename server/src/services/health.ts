@@ -2,7 +2,7 @@ import { getDb } from '../db/index.js';
 import { resolveProvider } from '../providers/index.js';
 import { decrypt } from '../lib/crypto.js';
 import type { Platform, KeyStatus } from '@freellmapi/shared/types.js';
-import { inferQuotaPoolKey } from './provider-quota.js';
+import { inferQuotaPoolKey, recordQuotaObservation } from './provider-quota.js';
 import type { Scheduler } from '../lib/scheduler.js';
 
 const CHECK_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
@@ -10,6 +10,49 @@ const CONSECUTIVE_FAILURES_TO_DISABLE = 3;
 
 // Track consecutive failures per key
 const failureCount = new Map<number, number>();
+
+async function refreshOpenRouterCredits(keyId: number, apiKey: string): Promise<void> {
+  const endpoint = 'https://openrouter.ai/api/v1/credits';
+  try {
+    const response = await fetch(endpoint, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(10_000),
+    });
+    const raw = await response.text();
+    let body: any = null;
+    try { body = JSON.parse(raw); } catch { /* preserve the raw response only in the observation */ }
+    const total = Number(body?.data?.total_credits);
+    const used = Number(body?.data?.total_usage);
+    const hasCredits = Number.isFinite(total) && Number.isFinite(used);
+    recordQuotaObservation({
+      platform: 'openrouter',
+      keyId,
+      quotaPoolKey: `openrouter::key:${keyId}`,
+      metric: 'credits',
+      limit: hasCredits ? total : null,
+      remaining: hasCredits ? Math.max(0, total - used) : null,
+      source: 'quota_api',
+      statusCode: response.status,
+      endpoint,
+      notes: response.ok
+        ? (hasCredits ? 'OpenRouter 账户额度' : 'OpenRouter 未返回账户额度；请使用 Management Key')
+        : `OpenRouter 额度查询失败（HTTP ${response.status}）；普通推理 Key 可能无权限，请使用 Management Key`,
+      rawJson: raw.slice(0, 2000),
+      confidence: response.ok && hasCredits ? 1 : 0.75,
+    });
+  } catch (err: any) {
+    recordQuotaObservation({
+      platform: 'openrouter',
+      keyId,
+      quotaPoolKey: `openrouter::key:${keyId}`,
+      metric: 'credits',
+      source: 'quota_api',
+      endpoint,
+      notes: `OpenRouter 额度查询异常：${err?.message ?? 'unknown error'}`,
+      confidence: 0.5,
+    });
+  }
+}
 
 export async function checkKeyHealth(keyId: number): Promise<KeyStatus> {
   const db = getDb();
@@ -28,6 +71,14 @@ export async function checkKeyHealth(keyId: number): Promise<KeyStatus> {
       endpoint: 'models',
       origin: 'health',
     });
+
+    // Keep account-level balance separate for every key. A normal OpenRouter
+    // inference key may not be allowed to read /credits; that limitation is
+    // recorded as a quota observation without making an otherwise valid key
+    // unusable.
+    if (row.platform === 'openrouter') {
+      await refreshOpenRouterCredits(keyId, apiKey);
+    }
 
     const status: KeyStatus = isValid ? 'healthy' : 'invalid';
 

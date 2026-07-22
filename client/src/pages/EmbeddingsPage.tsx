@@ -273,7 +273,7 @@ export default function EmbeddingsPage() {
             const u = usageByFamily.get(f.family)
             const noKeys = f.providers.every(p => p.keyCount === 0)
             return (
-              <section key={f.family} className={`rounded-3xl border bg-card p-5 ${noKeys ? 'opacity-60' : ''}`}>
+              <section key={f.family} className={`rounded-3xl border bg-card/85 p-5 backdrop-blur-md ${noKeys ? 'opacity-60' : ''}`}>
                 <div className="flex items-baseline justify-between gap-4 mb-3 flex-wrap">
                   <div className="flex items-baseline gap-2.5 min-w-0">
                     <Link to={`/models/embeddings/${encodeURIComponent(f.family)}`} className="text-sm font-medium font-mono truncate hover:underline">{f.family}</Link>

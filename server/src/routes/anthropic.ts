@@ -10,7 +10,7 @@ import type {
   ChatContentBlock,
 } from '@freellmapi/shared/types.js';
 import { routeRequest, routingReserveTokens, type RouteResult } from '../services/router.js';
-import { getUnifiedApiKey } from '../db/index.js';
+import { getDb, getUnifiedApiKey } from '../db/index.js';
 import { contentToString } from '../lib/content.js';
 import { repairToolArguments, toolSchemaMap } from '../lib/tool-args.js';
 import { rescueInlineToolCalls, startsWithDialectMarker, couldBecomeDialectMarker, containsDialectMarker } from '../lib/tool-call-rescue.js';
@@ -21,6 +21,7 @@ import { runFallbackLoop, newFallbackState, recordUpstreamSuccess, type Exhausti
 import { applyTokenBudget, tokenBudgetMessage } from '../lib/guardrails.js';
 import { resolveAnthropicModel } from '../services/anthropic-map.js';
 import { buildModelListing, filterModelListingForConsumer } from '../services/model-listing.js';
+import { validateConsumerApiKey } from '../services/consumer-api-keys.js';
 
 // Anthropic-compatible Messages API (`POST /v1/messages`). This is a thin
 // translation layer over the SAME router/fallback/analytics machinery the
@@ -814,7 +815,7 @@ anthropicRouter.get('/models', (req: Request, res: Response, next: NextFunction)
   if (!authenticate(req, res)) return;
 
   const token = extractApiToken(req);
-  const { models } = token?.startsWith('tuoke-')
+  const { models } = token && validateConsumerApiKey(getDb(), token)
     ? filterModelListingForConsumer(buildModelListing())
     : buildModelListing();
   const data = [

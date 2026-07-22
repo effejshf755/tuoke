@@ -17,7 +17,18 @@ export interface ModelOverridePatch {
   supportsTools?: boolean;
 }
 
+export interface ModelMetadata {
+  manufacturer?: string;
+  upstreamPlatform?: string;
+  modelType?: string;
+  billingType?: string;
+  apiType?: string;
+  sourceMethod?: string;
+  description?: string;
+}
+
 type StoredOverrides = Partial<ModelOverridePatch>;
+type RawStoredOverrides = StoredOverrides & { metadata?: ModelMetadata };
 
 const OVERRIDE_COLUMNS: Record<keyof ModelOverridePatch, string> = {
   displayName: 'display_name',
@@ -34,7 +45,7 @@ const OVERRIDE_COLUMNS: Record<keyof ModelOverridePatch, string> = {
   supportsTools: 'supports_tools',
 };
 
-function parseOverrides(raw: string | undefined): StoredOverrides {
+function parseRawOverrides(raw: string | undefined): RawStoredOverrides {
   if (!raw) return {};
   try {
     const parsed = JSON.parse(raw) as unknown;
@@ -42,6 +53,15 @@ function parseOverrides(raw: string | undefined): StoredOverrides {
   } catch {
     return {};
   }
+}
+
+function parseOverrides(raw: string | undefined): StoredOverrides {
+  const parsed = parseRawOverrides(raw);
+  const result: StoredOverrides = {};
+  for (const key of Object.keys(OVERRIDE_COLUMNS) as Array<keyof ModelOverridePatch>) {
+    if (Object.prototype.hasOwnProperty.call(parsed, key)) result[key] = parsed[key] as never;
+  }
+  return result;
 }
 
 function toDbValue(key: keyof ModelOverridePatch, value: unknown): unknown {
@@ -111,7 +131,7 @@ export function upsertModelOverrides(
   const existing = db
     .prepare('SELECT overrides_json FROM model_overrides WHERE platform = ? AND model_id = ?')
     .get(platform, modelId) as { overrides_json: string } | undefined;
-  const merged: StoredOverrides = { ...parseOverrides(existing?.overrides_json), ...cleaned };
+  const merged: RawStoredOverrides = { ...parseRawOverrides(existing?.overrides_json), ...cleaned };
   db.prepare(`
     INSERT INTO model_overrides (platform, model_id, overrides_json, updated_at)
     VALUES (?, ?, ?, datetime('now'))
@@ -119,6 +139,43 @@ export function upsertModelOverrides(
     DO UPDATE SET overrides_json = excluded.overrides_json, updated_at = excluded.updated_at
   `).run(platform, modelId, JSON.stringify(merged));
   return merged;
+}
+
+export function getModelMetadata(
+  db: Db,
+  platform: string,
+  modelId: string,
+): ModelMetadata {
+  const row = db
+    .prepare('SELECT overrides_json FROM model_overrides WHERE platform = ? AND model_id = ?')
+    .get(platform, modelId) as { overrides_json: string } | undefined;
+  const metadata = parseRawOverrides(row?.overrides_json).metadata;
+  return metadata && typeof metadata === 'object' ? metadata : {};
+}
+
+export function upsertModelMetadata(
+  db: Db,
+  platform: string,
+  modelId: string,
+  patch: ModelMetadata,
+): ModelMetadata {
+  const cleaned = Object.fromEntries(
+    Object.entries(patch).filter(([, value]) => typeof value === 'string'),
+  ) as ModelMetadata;
+  if (Object.keys(cleaned).length === 0) return getModelMetadata(db, platform, modelId);
+
+  const existing = db
+    .prepare('SELECT overrides_json FROM model_overrides WHERE platform = ? AND model_id = ?')
+    .get(platform, modelId) as { overrides_json: string } | undefined;
+  const raw = parseRawOverrides(existing?.overrides_json);
+  const metadata = { ...(raw.metadata ?? {}), ...cleaned };
+  db.prepare(`
+    INSERT INTO model_overrides (platform, model_id, overrides_json, updated_at)
+    VALUES (?, ?, ?, datetime('now'))
+    ON CONFLICT(platform, model_id)
+    DO UPDATE SET overrides_json = excluded.overrides_json, updated_at = excluded.updated_at
+  `).run(platform, modelId, JSON.stringify({ ...raw, metadata }));
+  return metadata;
 }
 
 export function getModelOverrides(

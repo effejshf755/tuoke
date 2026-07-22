@@ -21,6 +21,9 @@ import * as rechargeOrders from '../migrations/20260720_000011_recharge_orders.j
 import * as platformSettings from '../migrations/20260720_000012_platform_settings.js';
 import * as bonusWalletTransaction from '../migrations/20260720_000013_bonus_wallet_transaction.js';
 import * as playgroundConversations from '../migrations/20260720_000014_playground_conversations.js';
+import * as openrouterFreeModels from '../migrations/20260722_000016_openrouter_free_models.js';
+import * as openrouterFreeBillingRules from '../migrations/20260722_000017_openrouter_free_billing_rules.js';
+import * as siliconflowTestModels from '../migrations/20260722_000018_siliconflow_test_models.js';
 
 export interface MigrationModule {
   up(db: Db): void;
@@ -54,6 +57,9 @@ export const RECHARGE_ORDERS_FILENAME = '20260720_000011_recharge_orders.ts';
 export const PLATFORM_SETTINGS_FILENAME = '20260720_000012_platform_settings.ts';
 export const BONUS_WALLET_TRANSACTION_FILENAME = '20260720_000013_bonus_wallet_transaction.ts';
 export const PLAYGROUND_CONVERSATIONS_FILENAME = '20260720_000014_playground_conversations.ts';
+export const OPENROUTER_FREE_MODELS_FILENAME = '20260722_000016_openrouter_free_models.ts';
+export const OPENROUTER_FREE_BILLING_RULES_FILENAME = '20260722_000017_openrouter_free_billing_rules.ts';
+export const SILICONFLOW_TEST_MODELS_FILENAME = '20260722_000018_siliconflow_test_models.ts';
 
 export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: LEGACY_BASELINE_FILENAME, module: legacyBaseline },
@@ -78,4 +84,7 @@ export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: PLATFORM_SETTINGS_FILENAME, module: platformSettings },
   { filename: BONUS_WALLET_TRANSACTION_FILENAME, module: bonusWalletTransaction },
 { filename: PLAYGROUND_CONVERSATIONS_FILENAME, module: playgroundConversations },
+  { filename: OPENROUTER_FREE_MODELS_FILENAME, module: openrouterFreeModels },
+  { filename: OPENROUTER_FREE_BILLING_RULES_FILENAME, module: openrouterFreeBillingRules },
+  { filename: SILICONFLOW_TEST_MODELS_FILENAME, module: siliconflowTestModels },
 ];

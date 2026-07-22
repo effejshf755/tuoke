@@ -67,6 +67,7 @@ export interface TokenUsageData {
   totalBudget: number
   totalUsed: number
   models: { displayName: string; platform: string; modelId?: string; budget: number; used?: number }[]
+  liveCredits?: { platform: string; total: number; remaining: number; keyCount: number; observedAt: string | null } | null
 }
 
 // Custom endpoints all share the generic 'custom' platform id, so show the

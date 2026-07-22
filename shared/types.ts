@@ -45,6 +45,7 @@ export type Platform =
   | 'cerebras'
   | 'nvidia'
   | 'mistral'
+  | 'deepseek'
   | 'sambanova'
   | 'openrouter'
   | 'github'

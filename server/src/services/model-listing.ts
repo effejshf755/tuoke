@@ -1,6 +1,7 @@
 import type { ModelListRow } from '@freellmapi/shared/types.js';
 import { getDb } from '../db/index.js';
 import { isUnifyEnabled, getModelGroups } from './model-groups.js';
+import { getModelHealthMap } from './model-health.js';
 
 // Shared catalog-listing logic behind both the OpenAI `GET /v1/models` and the
 // Anthropic `GET /v1/models` endpoints, so the two wire formats list the exact
@@ -41,8 +42,9 @@ export interface ModelListing {
  */
 export function getConsumerCallableCanonicalIds(): Set<string> {
   const db = getDb();
+  const health = getModelHealthMap(db);
   const rows = db.prepare(`
-    SELECT DISTINCT m.id AS modelDbId, m.model_id AS modelId
+    SELECT DISTINCT m.id AS modelDbId, m.model_id AS modelId, m.platform
     FROM models m
     JOIN model_billing_rules b
       ON b.platform = m.platform
@@ -56,13 +58,15 @@ export function getConsumerCallableCanonicalIds(): Set<string> {
           AND k.enabled = 1
           AND (m.key_id IS NULL OR k.id = m.key_id)
       )
-  `).all() as Array<{ modelDbId: number; modelId: string }>;
+  `).all() as Array<{ modelDbId: number; modelId: string; platform?: string }>;
+
+  const healthyRows = rows.filter(row => health[`${row.platform ?? ''}:${row.modelId}`]?.status !== 'failed');
 
   if (!isUnifyEnabled()) {
-    return new Set(rows.map(row => row.modelId));
+    return new Set(healthyRows.map(row => row.modelId));
   }
 
-  const callableModelDbIds = new Set(rows.map(row => row.modelDbId));
+  const callableModelDbIds = new Set(healthyRows.map(row => row.modelDbId));
   return new Set(
     getModelGroups()
       .filter(group => group.members.some(member => callableModelDbIds.has(member.model_db_id)))

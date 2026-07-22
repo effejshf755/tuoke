@@ -46,6 +46,7 @@ import UserAnalyticsPage from '@/pages/UserAnalyticsPage'
 import ApiDocsPage from '@/pages/ApiDocsPage'
 import AdminUsersPage from '@/pages/AdminUsersPage'
 import AdminBillingPage from '@/pages/AdminBillingPage'
+import AdminModelsPage from '@/pages/AdminModelsPage'
 import AdminRechargePage from '@/pages/AdminRechargePage'
 import AdminDashboardPage from '@/pages/AdminDashboardPage'
 import AdminSettingsPage from '@/pages/AdminSettingsPage'
@@ -71,6 +72,7 @@ const navItems = [
   { to: '/premium', labelKey: 'nav.premium' },
   { to: '/admin/users', labelKey: 'nav.users' },
   { to: '/admin/dashboard', labelKey: 'nav.dashboard' },
+  { to: '/admin/models', labelKey: '模型管理' },
   { to: '/admin/billing', labelKey: 'nav.billing' },
   { to: '/admin/recharge', labelKey: 'nav.recharge' },
   { to: '/admin/settings', labelKey: 'nav.settings' },
@@ -381,6 +383,7 @@ function App() {
                 <Route path="/api-docs" element={<ApiDocsPage />} />
                 <Route path="/admin/users" element={<AdminUsersPage />} />
                 <Route path="/admin/dashboard" element={<AdminDashboardPage />} />
+                <Route path="/admin/models" element={<AdminModelsPage />} />
                 <Route path="/admin/billing" element={<AdminBillingPage />} />
                 <Route path="/admin/recharge" element={<AdminRechargePage />} />
                 <Route path="/admin/settings" element={<AdminSettingsPage />} />

@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge'
 import { FieldError } from '@/components/ui/field-error'
 import { CardSkeleton } from '@/components/ui/skeleton'
 import { useI18n } from '@/i18n'
+import { formatBeijingDateTime } from '@/lib/utils'
 
 interface LicenseStatus {
   valid: boolean
@@ -39,12 +40,12 @@ interface PremiumStatus {
 
 function fmtWhen(ms: number | null): string | null {
   if (!ms) return null
-  return new Date(ms).toLocaleString()
+  return formatBeijingDateTime(ms)
 }
 
 function fmtDate(iso: string | null): string {
   if (!iso) return ''
-  return new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })
+  return formatBeijingDateTime(iso, { year: 'numeric', month: 'long', day: 'numeric' })
 }
 
 export default function PremiumPage() {
