@@ -47,6 +47,12 @@ type DeviceStatusResponse = {
   error: string | null
 }
 
+type OperationFeedback = {
+  tone: 'success' | 'error' | 'info'
+  message: string
+  detail?: string | null
+}
+
 function CodexAdminTabs() {
   const itemClass = ({ isActive }: { isActive: boolean }) =>
     `rounded-lg px-3 py-2 text-sm transition-colors ${
@@ -79,7 +85,7 @@ export default function AdminCodexAccountsPage() {
   const queryClient = useQueryClient()
   const accountsSectionRef = useRef<HTMLElement>(null)
   const authFileInputRef = useRef<HTMLInputElement>(null)
-  const [importResult, setImportResult] = useState<{ imported: number; error: string | null } | null>(null)
+  const [feedback, setFeedback] = useState<OperationFeedback | null>(null)
   const [deviceAuth, setDeviceAuth] = useState<DeviceStartResponse | null>(null)
   const [isStartingAuth, setIsStartingAuth] = useState(false)
   const [checkingAccountId, setCheckingAccountId] = useState<number | null>(null)
@@ -112,22 +118,26 @@ export default function AdminCodexAccountsPage() {
         delete next[variables.id]
         return next
       })
-      setImportResult({ imported: 0, error: null })
+      setFeedback({
+        tone: 'success',
+        message: `账号用途已更换为${variables.resourceScope === 'resource_subpool' ? '“Codex 拼单专用”' : '“Codex 账号池”'}。`,
+      })
       await queryClient.invalidateQueries({ queryKey: ['admin-codex-accounts'] })
     },
     onError: (mutationError) => {
-      setImportResult({ imported: 0, error: mutationError instanceof Error ? mutationError.message : '账号用途修改失败' })
+      setFeedback({ tone: 'error', message: '账号用途更换失败。', detail: mutationError instanceof Error ? mutationError.message : null })
     },
   })
 
   const deleteAccount = useMutation({
     mutationFn: (id: number) => apiFetch(`/api/admin/codex/accounts/${id}`, { method: 'DELETE' }),
-    onSuccess: async () => {
-      setImportResult({ imported: 0, error: null })
+    onSuccess: async (_result, accountId) => {
+      const label = accounts.find((account) => account.id === accountId)?.label
+      setFeedback({ tone: 'success', message: label ? `Codex 账号“${label}”已删除。` : 'Codex 账号已删除。' })
       await queryClient.invalidateQueries({ queryKey: ['admin-codex-accounts'] })
     },
     onError: (mutationError) => {
-      setImportResult({ imported: 0, error: mutationError instanceof Error ? mutationError.message : '删除账号失败' })
+      setFeedback({ tone: 'error', message: '删除账号失败。', detail: mutationError instanceof Error ? mutationError.message : null })
     },
   })
 
@@ -137,11 +147,15 @@ export default function AdminCodexAccountsPage() {
       body: JSON.stringify(auth),
     }),
     onSuccess: async (result) => {
-      setImportResult({ imported: result.success ? 1 : 0, error: result.model_discovery_error })
+      setFeedback({
+        tone: result.success ? 'success' : 'error',
+        message: result.success ? 'Codex 授权账号导入成功。' : 'Codex 授权账号导入失败。',
+        detail: result.model_discovery_error,
+      })
       await queryClient.invalidateQueries({ queryKey: ['admin-codex-accounts'] })
     },
     onError: (mutationError) => {
-      setImportResult({ imported: 0, error: mutationError instanceof Error ? mutationError.message : '导入失败' })
+      setFeedback({ tone: 'error', message: 'Codex 授权账号导入失败。', detail: mutationError instanceof Error ? mutationError.message : null })
     },
   })
 
@@ -151,27 +165,28 @@ export default function AdminCodexAccountsPage() {
       { method: 'POST' },
     ),
     onSuccess: async (result) => {
-      setImportResult({
-        imported: 0,
-        error: result.success ? null : result.account.last_error || 'Codex 账号检测失败',
+      setFeedback({
+        tone: result.success ? 'success' : 'error',
+        message: result.success ? `Codex 账号“${result.account.label}”检测正常。` : 'Codex 账号检测失败。',
+        detail: result.success ? null : result.account.last_error,
       })
       await queryClient.invalidateQueries({ queryKey: ['admin-codex-accounts'] })
     },
     onError: (mutationError) => {
-      setImportResult({ imported: 0, error: mutationError instanceof Error ? mutationError.message : 'Codex 账号检测失败' })
+      setFeedback({ tone: 'error', message: 'Codex 账号检测失败。', detail: mutationError instanceof Error ? mutationError.message : null })
     },
     onSettled: () => setCheckingAccountId(null),
   })
 
   const importAuthFile = async (file: File | undefined) => {
     if (!file) return
-    setImportResult(null)
+    setFeedback(null)
     try {
       if (file.size > 2 * 1024 * 1024) throw new Error('auth.json 文件过大')
       const auth = JSON.parse(await file.text()) as unknown
       importLocalAccount.mutate(auth)
     } catch (fileError) {
-      setImportResult({ imported: 0, error: fileError instanceof Error ? fileError.message : '无法读取 auth.json' })
+      setFeedback({ tone: 'error', message: '无法读取 auth.json。', detail: fileError instanceof Error ? fileError.message : null })
     } finally {
       if (authFileInputRef.current) authFileInputRef.current.value = ''
     }
@@ -188,15 +203,15 @@ export default function AdminCodexAccountsPage() {
         if (stopped || result.status === 'pending') return
         setDeviceAuth(null)
         if (result.status === 'complete') {
-          setImportResult({ imported: result.imported, error: result.model_discovery_error })
+          setFeedback({ tone: 'success', message: 'Codex 授权完成，账号已自动导入。', detail: result.model_discovery_error })
           await queryClient.invalidateQueries({ queryKey: ['admin-codex-accounts'] })
         } else {
-          setImportResult({ imported: 0, error: result.error || 'Codex 授权失败' })
+          setFeedback({ tone: 'error', message: 'Codex 授权失败。', detail: result.error })
         }
       } catch (pollError) {
         if (!stopped) {
           setDeviceAuth(null)
-          setImportResult({ imported: 0, error: pollError instanceof Error ? pollError.message : '授权状态检查失败' })
+          setFeedback({ tone: 'error', message: '授权状态检查失败。', detail: pollError instanceof Error ? pollError.message : null })
         }
       }
     }
@@ -212,15 +227,21 @@ export default function AdminCodexAccountsPage() {
     const popup = window.open('about:blank', '_blank')
     if (popup) popup.opener = null
     setIsStartingAuth(true)
-    setImportResult(null)
+    setFeedback(null)
     try {
       const result = await apiFetch<DeviceStartResponse>('/api/admin/codex-auth/device/start', { method: 'POST' })
       setDeviceAuth(result)
+      try {
+        await navigator.clipboard.writeText(result.userCode)
+        setFeedback({ tone: 'info', message: '验证码已复制，请在打开的 OpenAI 页面粘贴并确认授权。' })
+      } catch {
+        setFeedback({ tone: 'info', message: '请在打开的 OpenAI 页面输入下方验证码并确认授权。' })
+      }
       if (popup) popup.location.href = result.verificationUrl
       else window.open(result.verificationUrl, '_blank', 'noopener,noreferrer')
     } catch (startError) {
       popup?.close()
-      setImportResult({ imported: 0, error: startError instanceof Error ? startError.message : '无法启动 Codex 授权' })
+      setFeedback({ tone: 'error', message: '无法启动 Codex 授权。', detail: startError instanceof Error ? startError.message : null })
     } finally {
       setIsStartingAuth(false)
     }
@@ -288,7 +309,7 @@ export default function AdminCodexAccountsPage() {
         {deviceAuth && (
           <div className="mt-5 rounded-2xl border border-sky-500/30 bg-sky-500/10 p-5 text-sm">
             <p className="font-medium text-sky-200">请在 OpenAI 页面完成 Codex 授权</p>
-            <p className="mt-2 text-muted-foreground">浏览器已打开授权页，请输入下面的验证码。授权完成后本页面会自动导入账号。</p>
+            <p className="mt-2 text-muted-foreground">浏览器已打开授权页。验证码会尽量自动携带或复制到剪贴板；在 OpenAI 页面确认后，本页面会自动导入账号。</p>
             <div className="mt-4 flex flex-wrap items-center gap-3">
               <code className="rounded-xl border border-sky-400/30 bg-background/70 px-4 py-2 text-lg font-semibold tracking-widest text-sky-100">
                 {deviceAuth.userCode}
@@ -300,10 +321,10 @@ export default function AdminCodexAccountsPage() {
           </div>
         )}
 
-        {importResult && (
-          <div className={`mt-5 rounded-2xl border p-4 text-sm ${importResult.error ? 'border-red-500/30 bg-red-500/10 text-red-300' : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'}`}>
-            <p>成功导入 {importResult.imported} 个 Codex 授权账号。</p>
-            {importResult.error && <p className="mt-1 break-words text-xs opacity-90">错误信息：{importResult.error}</p>}
+        {feedback && (
+          <div className={`mt-5 rounded-2xl border p-4 text-sm ${feedback.tone === 'error' ? 'border-red-500/30 bg-red-500/10 text-red-300' : feedback.tone === 'success' ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-sky-500/30 bg-sky-500/10 text-sky-200'}`}>
+            <p>{feedback.message}</p>
+            {feedback.detail && <p className="mt-1 break-words text-xs opacity-90">{feedback.detail}</p>}
           </div>
         )}
 

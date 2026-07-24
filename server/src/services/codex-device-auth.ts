@@ -35,6 +35,8 @@ interface DeviceCodeResponse {
   device_auth_id: string;
   user_code: string;
   interval?: number;
+  verification_uri?: string;
+  verification_uri_complete?: string;
 }
 
 interface DeviceTokenResponse {
@@ -212,7 +214,7 @@ export async function startCodexDeviceAuthorization() {
   });
   return {
     loginId: session.id,
-    verificationUrl: DEVICE_VERIFICATION_URL,
+    verificationUrl: result.verification_uri_complete || result.verification_uri || DEVICE_VERIFICATION_URL,
     userCode: session.userCode,
     expiresInSeconds: MAX_LOGIN_AGE_MS / 1000,
   };
