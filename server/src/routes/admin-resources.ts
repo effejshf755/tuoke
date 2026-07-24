@@ -1,6 +1,6 @@
 import { Router, type Request } from 'express';
 import { getDb } from '../db/index.js';
-import { activateSubpool, stageSubpoolCodexAccount } from '../services/resource-subpool-activation.js';
+import { activateSubpool, clearStagedSubpoolCodexAccount, stageSubpoolCodexAccount } from '../services/resource-subpool-activation.js';
 import { recordResourceAdminAudit, listResourceAdminAuditLogs } from '../services/resource-admin-audit.js';
 import {
   adjustResourceMemberQuota,
@@ -321,6 +321,13 @@ adminResourcesRouter.put('/subpools/:id/binding', (req, res) => {
     stageSubpoolCodexAccount(db, subpoolId, accountId, adminId(req));
     res.status(204).end();
   } catch (error) { res.status(409).json({ error: { type: 'resource_binding_conflict', message: error instanceof Error ? error.message : String(error) } }); }
+});
+
+adminResourcesRouter.post('/subpools/:id/clear-pending-account', (req, res) => {
+  try {
+    clearStagedSubpoolCodexAccount(getDb(), Number(req.params.id), adminId(req));
+    res.json({ cleared: true });
+  } catch (error) { subpoolOperationError(res, error); }
 });
 
 adminResourcesRouter.post('/subpools/:id/activate', (req, res) => {

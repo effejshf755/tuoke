@@ -48,6 +48,21 @@ export function stageSubpoolCodexAccount(db: Db, subpoolId: number, accountId: n
   })();
 }
 
+export function clearStagedSubpoolCodexAccount(db: Db, subpoolId: number, adminId: number): void {
+  db.transaction(() => {
+    const row = db.prepare(`SELECT pending_codex_account_id accountId FROM resource_subpools
+      WHERE id = ? AND mode = 'dedicated' AND status = 'waiting_resource'`).get(subpoolId) as { accountId: number | null } | undefined;
+    if (!row) throw new Error('Dedicated subpool must be waiting_resource');
+    if (row.accountId === null) return;
+    db.prepare(`UPDATE resource_subpools SET pending_codex_account_id = NULL,
+      updated_at = datetime('now') WHERE id = ? AND status = 'waiting_resource'`).run(subpoolId);
+    recordResourceAdminAudit(db, {
+      adminUserId: adminId, action: 'codex_account_stage_cleared', targetType: 'codex_oauth_account',
+      targetId: row.accountId, subpoolId, details: { accountId: row.accountId },
+    });
+  })();
+}
+
 export function activateSubpool(subpoolId: number, adminId: number): ActivatedSubpoolResult;
 export function activateSubpool(db: Db, subpoolId: number, adminId: number): ActivatedSubpoolResult;
 export function activateSubpool(

@@ -45,6 +45,7 @@ export function getResourceSubpoolDetail(db: Db, subpoolId: number) {
     s.member_limit memberLimit, s.starts_at startsAt, s.ends_at endsAt,
     s.created_at createdAt, s.updated_at updatedAt, s.activated_at activatedAt,
     s.product_id productId, s.pending_codex_account_id pendingAccountId,
+    s.frozen_total_quota_units frozenTotalQuotaUnits,
     p.name productName, p.version productVersion,
     b.codex_account_id accountId, a.label accountLabel, a.status accountStatus,
     a.quota_remaining_percent accountQuotaRemainingPercent, a.quota_reset_at accountQuotaResetAt,

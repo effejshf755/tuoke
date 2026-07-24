@@ -4,7 +4,7 @@ import { runMigrationsSync } from '../../db/migrate/runner.js';
 import { createResourceOrder } from '../../services/resource-orders.js';
 import { createResourceProduct, publishResourceProduct } from '../../services/resource-products.js';
 import { groupPaidResourceOrder, markResourceOrderPaidForGrouping } from '../../services/resource-grouping.js';
-import { activateSubpool, stageSubpoolCodexAccount } from '../../services/resource-subpool-activation.js';
+import { activateSubpool, clearStagedSubpoolCodexAccount, stageSubpoolCodexAccount } from '../../services/resource-subpool-activation.js';
 import { createConsumerApiKey } from '../../services/consumer-api-keys.js';
 
 describe('resource subpool activation', () => {
@@ -67,6 +67,17 @@ describe('resource subpool activation', () => {
     expect((db.prepare(`SELECT COUNT(*) count FROM resource_subpool_bindings WHERE subpool_id = ? AND status = 'active'`).get(subpoolId) as { count: number }).count).toBe(1);
     expect((db.prepare(`SELECT COUNT(*) count FROM resource_quota_ledger WHERE subpool_id = ? AND type = 'reset'`).get(subpoolId) as { count: number }).count).toBe(4);
     expect((db.prepare(`SELECT COUNT(*) count FROM resource_subpool_members WHERE subpool_id = ? AND consumer_api_key_id IS NOT NULL`).get(subpoolId) as { count: number }).count).toBe(4);
+  });
+
+  it('allows an administrator to clear a staged account before activation', () => {
+    const { subpoolId } = createFormedSubpool();
+    const accountId = createAccount('clear-staged', 100);
+    stageSubpoolCodexAccount(db, subpoolId, accountId, adminId);
+    clearStagedSubpoolCodexAccount(db, subpoolId, adminId);
+    expect(db.prepare(`SELECT pending_codex_account_id pending FROM resource_subpools WHERE id = ?`).get(subpoolId))
+      .toEqual({ pending: null });
+    expect(db.prepare(`SELECT action FROM resource_admin_audit_logs WHERE subpool_id = ? ORDER BY id DESC LIMIT 1`).get(subpoolId))
+      .toEqual({ action: 'codex_account_stage_cleared' });
   });
 
   it('uses the entitlement frozen at grouping after the product row changes', () => {
