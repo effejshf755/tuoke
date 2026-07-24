@@ -143,4 +143,47 @@ describe('admin resource order operations', () => {
     expect(getDb().prepare(`SELECT order_status status FROM resource_orders WHERE id = ?`).get(purchase.order.id)).toEqual({ status: 'paid_waiting_group' });
     expect(getDb().prepare(`SELECT balance_micro balance FROM users WHERE id = ?`).get(userId)).toEqual({ balance: 10_000_000 });
   });
+
+  it('cancels a formed subpool and refunds every order exactly once', async () => {
+    const item = product('Cancel formed group');
+    const users = [user('cancel-group-one'), user('cancel-group-two')];
+    let subpoolId = 0;
+    const orderIds: number[] = [];
+    for (const [index, userId] of users.entries()) {
+      const purchase = purchaseResourceProduct(getDb(), {
+        userId, productId: item.id, idempotencyKey: `cancel-formed-${sequence}-${index}`,
+      });
+      subpoolId = purchase.grouping.subpoolId;
+      orderIds.push(purchase.order.id);
+    }
+    expect(getDb().prepare(`SELECT status FROM resource_subpools WHERE id = ?`).get(subpoolId)).toEqual({ status: 'waiting_resource' });
+
+    const cancelled = await call(app, 'POST', `/api/admin/resources/subpools/${subpoolId}/cancel-and-refund`, {}, adminToken);
+    expect(cancelled.status).toBe(200);
+    expect(cancelled.body).toMatchObject({ subpoolId, orderCount: 2, refundedMicro: 20_000_000 });
+    expect(getDb().prepare(`SELECT status FROM resource_subpools WHERE id = ?`).get(subpoolId)).toEqual({ status: 'expired' });
+    expect(getDb().prepare(`SELECT COUNT(*) count FROM resource_subpool_members WHERE subpool_id = ?`).get(subpoolId)).toEqual({ count: 0 });
+    for (const [index, orderId] of orderIds.entries()) {
+      expect(getDb().prepare(`SELECT order_status status FROM resource_orders WHERE id = ?`).get(orderId)).toEqual({ status: 'refunded' });
+      expect(getDb().prepare(`SELECT balance_micro balance FROM users WHERE id = ?`).get(users[index])).toEqual({ balance: 20_000_000 });
+      expect(getDb().prepare(`SELECT COUNT(*) count FROM wallet_transactions
+        WHERE resource_order_id = ? AND type = 'purchase_refund'`).get(orderId)).toEqual({ count: 1 });
+    }
+
+    const repeated = await call(app, 'POST', `/api/admin/resources/subpools/${subpoolId}/cancel-and-refund`, {}, adminToken);
+    expect(repeated.status).toBe(409);
+    for (const [index, orderId] of orderIds.entries()) {
+      expect(getDb().prepare(`SELECT balance_micro balance FROM users WHERE id = ?`).get(users[index])).toEqual({ balance: 20_000_000 });
+      expect(getDb().prepare(`SELECT COUNT(*) count FROM wallet_transactions
+        WHERE resource_order_id = ? AND type = 'purchase_refund'`).get(orderId)).toEqual({ count: 1 });
+    }
+  });
+
+  it('rejects cancelling an active subpool', async () => {
+    const active = getDb().prepare(`SELECT subpool_id subpoolId FROM resource_orders
+      WHERE order_status = 'active' ORDER BY id DESC LIMIT 1`).get() as { subpoolId: number };
+    const result = await call(app, 'POST', `/api/admin/resources/subpools/${active.subpoolId}/cancel-and-refund`, {}, adminToken);
+    expect(result.status).toBe(409);
+    expect(result.body.error.message).toMatch(/non-activated/);
+  });
 });

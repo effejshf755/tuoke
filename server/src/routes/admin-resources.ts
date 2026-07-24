@@ -21,6 +21,7 @@ import {
 } from '../services/resource-products.js';
 import {
   ADMIN_RESOURCE_ORDER_STATUSES,
+  adminCancelResourceSubpool,
   adminRefundResourceOrder,
   getAdminResourceOrderDetail,
   listAdminResourceOrders,
@@ -216,6 +217,15 @@ adminResourcesRouter.get('/subpools/:id', (req, res) => {
   const detail = getResourceSubpoolDetail(getDb(), Number(req.params.id));
   if (!detail) { res.status(404).json({ error: { type: 'resource_subpool_not_found' } }); return; }
   res.json(detail);
+});
+
+adminResourcesRouter.post('/subpools/:id/cancel-and-refund', (req, res) => {
+  try {
+    res.json(adminCancelResourceSubpool(getDb(), {
+      subpoolId: Number(req.params.id),
+      adminId: adminId(req),
+    }));
+  } catch (error) { subpoolOperationError(res, error); }
 });
 
 function subpoolOperationError(res: Parameters<Parameters<typeof adminResourcesRouter.post>[1]>[1], error: unknown): void {

@@ -98,3 +98,80 @@ export function adminRefundResourceOrder(db: Db, input: {
     return result;
   })();
 }
+
+export function adminCancelResourceSubpool(db: Db, input: {
+  subpoolId: number;
+  adminId: number;
+}) {
+  return db.transaction(() => {
+    const pool = db.prepare(`SELECT id, status FROM resource_subpools WHERE id = ?`).get(input.subpoolId) as {
+      id: number; status: string;
+    } | undefined;
+    if (!pool) throw new Error('Resource subpool was not found');
+    if (!['waiting_members', 'waiting_resource'].includes(pool.status)) {
+      throw new Error('Only a non-activated subpool can be cancelled');
+    }
+
+    const orders = db.prepare(`SELECT o.id, o.order_no orderNo, o.user_id userId,
+      o.order_status status, o.paid_amount_micro paidAmountMicro
+      FROM resource_orders o
+      WHERE o.subpool_id = ? ORDER BY o.id`).all(input.subpoolId) as Array<{
+        id: number; orderNo: string; userId: number; status: string; paidAmountMicro: number | null;
+      }>;
+    if (!orders.length || orders.some((order) => !['paid_waiting_group', 'grouped'].includes(order.status))) {
+      throw new Error('Subpool contains an order that cannot be refunded');
+    }
+
+    const usage = db.prepare(`SELECT 1
+      FROM resource_subpool_members m
+      LEFT JOIN resource_member_quotas q ON q.member_id = m.id
+      LEFT JOIN resource_quota_reservations reservation ON reservation.member_quota_id = q.id
+      LEFT JOIN requests request_log ON request_log.consumer_api_key_id = m.consumer_api_key_id
+        AND datetime(request_log.created_at) >= datetime(m.joined_at)
+      WHERE m.subpool_id = ?
+        AND (reservation.id IS NOT NULL OR request_log.id IS NOT NULL)
+      LIMIT 1`).get(input.subpoolId);
+    if (usage) throw new Error('Resource subpool has usage records and cannot be cancelled');
+
+    let refundedMicro = 0;
+    for (const order of orders) {
+      const purchase = db.prepare(`SELECT ABS(delta_micro) amount FROM wallet_transactions
+        WHERE resource_order_id = ? AND type = 'purchase'`).get(order.id) as { amount: number } | undefined;
+      const amount = order.paidAmountMicro ?? purchase?.amount ?? 0;
+      if (!purchase || amount <= 0) throw new Error(`Original wallet purchase transaction was not found for order ${order.orderNo}`);
+      const wallet = db.prepare(`SELECT balance_micro balanceMicro FROM users WHERE id = ?`).get(order.userId) as {
+        balanceMicro: number;
+      } | undefined;
+      if (!wallet || !Number.isSafeInteger(wallet.balanceMicro + amount)) throw new Error('Wallet refund amount is invalid');
+      const balanceAfter = wallet.balanceMicro + amount;
+      db.prepare(`UPDATE users SET balance_micro = ? WHERE id = ?`).run(balanceAfter, order.userId);
+      db.prepare(`INSERT INTO wallet_transactions
+        (user_id, type, delta_micro, balance_after_micro, resource_order_id, note)
+        VALUES (?, 'purchase_refund', ?, ?, ?, ?)`).run(
+          order.userId, amount, balanceAfter, order.id,
+          `Resource purchase refund ${order.orderNo}: administrator cancelled subpool ${input.subpoolId}`,
+        );
+      const updated = db.prepare(`UPDATE resource_orders SET order_status = 'refunded',
+        refund_amount_micro = ?, refund_reason = 'administrator cancelled subpool',
+        refund_requested_at = datetime('now'), refunded_at = datetime('now'), updated_at = datetime('now')
+        WHERE id = ? AND order_status IN ('paid_waiting_group', 'grouped')`).run(amount, order.id);
+      if (updated.changes !== 1) throw new Error('Order state changed during subpool cancellation');
+      refundedMicro += amount;
+    }
+
+    db.prepare(`DELETE FROM resource_subpool_members WHERE subpool_id = ?`).run(input.subpoolId);
+    const expired = db.prepare(`UPDATE resource_subpools
+      SET status = 'expired', pending_codex_account_id = NULL, updated_at = datetime('now')
+      WHERE id = ? AND status IN ('waiting_members', 'waiting_resource')`).run(input.subpoolId);
+    if (expired.changes !== 1) throw new Error('Subpool state changed during cancellation');
+    recordResourceAdminAudit(db, {
+      adminUserId: input.adminId,
+      action: 'resource_subpool_cancelled_and_refunded',
+      targetType: 'resource_subpool',
+      targetId: input.subpoolId,
+      subpoolId: input.subpoolId,
+      details: { orderIds: orders.map((order) => order.id), orderCount: orders.length, refundedMicro },
+    });
+    return { subpoolId: input.subpoolId, orderCount: orders.length, refundedMicro };
+  })();
+}
