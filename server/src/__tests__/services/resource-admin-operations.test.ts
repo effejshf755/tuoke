@@ -65,6 +65,7 @@ describe('resource admin operations', () => {
     const detail = getResourceSubpoolDetail(db, seeded.subpoolId)!;
     expect((detail.members as any[])).toHaveLength(4);
     expect((detail.pool as any).accountId).toBe(seeded.accountId);
+    expect((detail.pool as any)).toMatchObject({ memberLimit: 4, productId: seeded.productId });
     expect(getResourceMemberQuota(db, seeded.subpoolId, seeded.memberId)).toMatchObject({ allocationUnits: 250_000, remainingUnits: 250_000 });
     const accounts = listAvailableCodexAccounts(db) as any[];
     expect(accounts.some((row) => row.id === seeded.accountId)).toBe(false);

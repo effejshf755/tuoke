@@ -41,15 +41,22 @@ export function listResourceSubpools(db: Db, status?: string) {
 }
 
 export function getResourceSubpoolDetail(db: Db, subpoolId: number) {
-  const pool = db.prepare(`SELECT s.*, p.name productName, p.version productVersion,
+  const pool = db.prepare(`SELECT s.id, s.name, s.resource_type resourceType, s.mode, s.status,
+    s.member_limit memberLimit, s.starts_at startsAt, s.ends_at endsAt,
+    s.created_at createdAt, s.updated_at updatedAt, s.activated_at activatedAt,
+    s.product_id productId, s.pending_codex_account_id pendingAccountId,
+    p.name productName, p.version productVersion,
     b.codex_account_id accountId, a.label accountLabel, a.status accountStatus,
     a.quota_remaining_percent accountQuotaRemainingPercent, a.quota_reset_at accountQuotaResetAt,
+    pending.label pendingAccountLabel, pending.status pendingAccountStatus,
+    pending.quota_remaining_percent pendingAccountQuotaRemainingPercent,
     q.id quotaPeriodId, q.allocation_units allocationUnits, q.used_units usedUnits,
     q.reserved_units reservedUnits, q.resets_at quotaResetsAt
     FROM resource_subpools s
     LEFT JOIN resource_products p ON p.id = s.product_id
     LEFT JOIN resource_subpool_bindings b ON b.subpool_id = s.id AND b.status = 'active'
     LEFT JOIN codex_oauth_accounts a ON a.id = b.codex_account_id
+    LEFT JOIN codex_oauth_accounts pending ON pending.id = s.pending_codex_account_id
     LEFT JOIN resource_subpool_quota_periods q ON q.subpool_id = s.id AND q.status = 'active'
     WHERE s.id = ?`).get(subpoolId);
   if (!pool) return null;
