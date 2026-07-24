@@ -186,4 +186,38 @@ describe('admin resource order operations', () => {
     expect(result.status).toBe(409);
     expect(result.body.error.message).toMatch(/non-activated/);
   });
+
+  it('ignores an already-refunded historical order still linked to the waiting subpool', async () => {
+    const item = product('Cancel group after member refund');
+    const firstUser = user('historical-refund');
+    const first = purchaseResourceProduct(getDb(), {
+      userId: firstUser, productId: item.id, idempotencyKey: `historical-first-${sequence}`,
+    });
+    const historicalOrderId = first.order.id;
+    const subpoolId = first.grouping.subpoolId;
+    const refunded = await call(app, 'POST', `/api/admin/resources/orders/${historicalOrderId}/refund`, {}, adminToken);
+    expect(refunded.status).toBe(200);
+
+    const currentUsers = [firstUser, user('historical-replacement')];
+    const currentOrderIds: number[] = [];
+    for (const [index, userId] of currentUsers.entries()) {
+      const purchase = purchaseResourceProduct(getDb(), {
+        userId, productId: item.id, idempotencyKey: `historical-current-${sequence}-${index}`,
+      });
+      expect(purchase.grouping.subpoolId).toBe(subpoolId);
+      currentOrderIds.push(purchase.order.id);
+    }
+    expect(getDb().prepare(`SELECT order_status status FROM resource_orders WHERE id = ?`).get(historicalOrderId)).toEqual({ status: 'refunded' });
+
+    const cancelled = await call(app, 'POST', `/api/admin/resources/subpools/${subpoolId}/cancel-and-refund`, {}, adminToken);
+    expect(cancelled.status).toBe(200);
+    expect(cancelled.body).toMatchObject({ subpoolId, orderCount: 2, refundedMicro: 20_000_000 });
+    expect(getDb().prepare(`SELECT COUNT(*) count FROM wallet_transactions
+      WHERE resource_order_id = ? AND type = 'purchase_refund'`).get(historicalOrderId)).toEqual({ count: 1 });
+    for (const orderId of currentOrderIds) {
+      expect(getDb().prepare(`SELECT order_status status FROM resource_orders WHERE id = ?`).get(orderId)).toEqual({ status: 'refunded' });
+      expect(getDb().prepare(`SELECT COUNT(*) count FROM wallet_transactions
+        WHERE resource_order_id = ? AND type = 'purchase_refund'`).get(orderId)).toEqual({ count: 1 });
+    }
+  });
 });

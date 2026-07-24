@@ -115,7 +115,10 @@ export function adminCancelResourceSubpool(db: Db, input: {
     const orders = db.prepare(`SELECT o.id, o.order_no orderNo, o.user_id userId,
       o.order_status status, o.paid_amount_micro paidAmountMicro
       FROM resource_orders o
-      WHERE o.subpool_id = ? ORDER BY o.id`).all(input.subpoolId) as Array<{
+      JOIN resource_subpool_members m
+        ON m.resource_order_id = o.id AND m.subpool_id = o.subpool_id
+      WHERE o.subpool_id = ? AND m.status IN ('waiting', 'active')
+      ORDER BY o.id`).all(input.subpoolId) as Array<{
         id: number; orderNo: string; userId: number; status: string; paidAmountMicro: number | null;
       }>;
     if (!orders.length || orders.some((order) => !['paid_waiting_group', 'grouped'].includes(order.status))) {
