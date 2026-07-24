@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { ChevronDown } from 'lucide-react'
 import { useI18n } from '@/i18n'
 import { formatPercent, formatTokens, platformColors, type TokenUsageData } from '@/lib/routing'
+import { ModelLogo } from '@/components/model-table'
 
 // Legend rows visible while collapsed (~6 rows: 6 × 16px line + 5 × 6px gap).
 const LEGEND_COLLAPSED_PX = 126
@@ -106,6 +107,7 @@ export function TokenUsageBar({ data }: { data: TokenUsageData }) {
                 className="size-2 rounded-sm flex-shrink-0"
                 style={{ backgroundColor: platformColors[m.platform] ?? '#94a3b8' }}
               />
+              <ModelLogo modelId={m.modelId ?? m.displayName} platform={m.platform} compact />
               <span className="truncate">{m.displayName}</span>
               <span className="flex-1" />
               <span className="font-mono text-muted-foreground">{formatTokens(m.remainingTokens)}</span>

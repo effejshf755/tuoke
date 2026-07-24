@@ -48,7 +48,7 @@ function isAutoModel(modelId: string | undefined): boolean {
 export function timingSafeStringEqual(provided: string, expected: string): boolean {
   if (provided.startsWith('tuoke-')) {
     const consumerKey = validateConsumerApiKey(getDb(), provided);
-    if (consumerKey) setConsumerIdentity(consumerKey.userId, consumerKey.id);
+    if (consumerKey) setConsumerIdentity(consumerKey.userId, consumerKey.id, consumerKey.keyType);
     return consumerKey !== null;
   }
   // Use HMAC to produce fixed-length digests so timingSafeEqual always
@@ -227,10 +227,21 @@ proxyRouter.get('/models', (req: Request, res: Response) => {
   // usable for billed users. Determine this from the validated key record,
   // rather than from a string prefix alone, so every third-party model picker
   // receives the same user-visible catalog policy.
-  const consumerRequest = validateConsumerApiKey(getDb(), token) !== null;
-  const catalog = consumerRequest
+  const consumerKey = validateConsumerApiKey(getDb(), token);
+  const consumerRequest = consumerKey !== null;
+  const baseCatalog = consumerRequest
     ? filterModelListingForConsumer(buildModelListing())
     : buildModelListing();
+  const catalog = consumerKey
+    ? {
+        ...baseCatalog,
+        models: baseCatalog.models.filter(model =>
+          consumerKey.keyType === 'codex_pool'
+            ? model.id === 'codex'
+            : model.id !== 'codex',
+        ),
+      }
+    : baseCatalog;
   const { models: allListed, autoContextWindow } = catalog;
 
   const q = String(req.query.available ?? req.query.connected ?? '').toLowerCase();
@@ -244,6 +255,7 @@ proxyRouter.get('/models', (req: Request, res: Response) => {
   res.json({
     object: 'list',
     data: [
+      ...(consumerKey?.keyType === 'codex_pool' ? [] : [
       {
         id: AUTO_MODEL_ID,
         object: 'model',
@@ -270,6 +282,7 @@ proxyRouter.get('/models', (req: Request, res: Response) => {
         available: autoContextWindow != null,
         unavailable_reason: autoContextWindow != null ? null : 'no_models',
       },
+      ]),
       ...listed.map(m => ({
         id: m.id,
         object: 'model',

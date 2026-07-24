@@ -402,6 +402,7 @@ modelsRouter.get('/', (_req: Request, res: Response) => {
     id: m.id,
     platform: m.platform,
     modelId: m.model_id,
+    upstreamModelId: m.upstream_model_id ?? null,
     displayName: m.display_name,
     intelligenceRank: m.intelligence_rank,
     speedRank: m.speed_rank,

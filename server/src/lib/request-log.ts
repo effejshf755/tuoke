@@ -2,7 +2,14 @@ import { chargeRequest } from '../services/billing.js';
 import { chargeReservedRequest } from '../services/reserved-billing.js';
 import { getDb } from '../db/index.js';
 import { pruneRequestAnalytics } from '../services/request-retention.js';
-import { getClientContext } from './client-context.js';
+import {
+  getClientContext,
+  takeCodexUsageRecordId,
+} from './client-context.js';
+import {
+  finalizeCodexUsageRecord,
+  getCodexUsageTokens,
+} from '../services/codex-usage.js';
 
 type LogTx = ReturnType<typeof getDb>;
 
@@ -62,11 +69,19 @@ export function logRequest(
     // Caller identity from the request-scoped context (set by the express
     // middleware); null when logging happens outside an HTTP request.
     const client = getClientContext();
+    const codexUsageRecordId = platform === 'openai-codex'
+      ? takeCodexUsageRecordId()
+      : null;
+    const codexTokens = codexUsageRecordId !== null && status === 'success'
+      ? getCodexUsageTokens(db, codexUsageRecordId)
+      : null;
+    const loggedInputTokens = codexTokens?.inputTokens ?? inputTokens;
+    const loggedOutputTokens = codexTokens?.outputTokens ?? outputTokens;
     const tx = db.transaction(() => {
       const insert = db.prepare(`
         INSERT INTO requests (platform, model_id, key_id, status, input_tokens, output_tokens, latency_ms, error, ttfb_ms, requested_model, client_ip, client_user_agent, consumer_user_id, consumer_api_key_id)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(platform, modelId, keyId, status, inputTokens, outputTokens, latencyMs, error, ttfbMs, requestedModel, client.ip, client.userAgent, client.consumerUserId, client.consumerApiKeyId);
+      `).run(platform, modelId, keyId, status, loggedInputTokens, loggedOutputTokens, latencyMs, error, ttfbMs, requestedModel, client.ip, client.userAgent, client.consumerUserId, client.consumerApiKeyId);
 
       const createdAt = db.prepare(`SELECT created_at FROM requests WHERE id = ?`).get(insert.lastInsertRowid) as { created_at: string } | undefined;
       const hour = hourKey(createdAt?.created_at ?? new Date().toISOString().slice(0, 19).replace('T', ' '));
@@ -82,11 +97,11 @@ export function logRequest(
           error_count    = error_count + ?,
           input_tokens   = input_tokens + ?,
           output_tokens  = output_tokens + ?
-      `).run(hour, isSuccess, isError, inputTokens, outputTokens, isSuccess, isError, inputTokens, outputTokens);
+      `).run(hour, isSuccess, isError, loggedInputTokens, loggedOutputTokens, isSuccess, isError, loggedInputTokens, loggedOutputTokens);
 
       incrementSetting(db, 'total_requests', 1);
-      incrementSetting(db, 'total_input_tokens', inputTokens);
-      incrementSetting(db, 'total_output_tokens', outputTokens);
+      incrementSetting(db, 'total_input_tokens', loggedInputTokens);
+      incrementSetting(db, 'total_output_tokens', loggedOutputTokens);
       if (createdAt?.created_at) {
         setSettingIfMissing(db, 'first_request_at', createdAt.created_at);
       }
@@ -154,6 +169,18 @@ export function logRequest(
         requestId,
         billingError,
       );
+    }
+
+    if (codexUsageRecordId !== null) {
+      try {
+        finalizeCodexUsageRecord(db, codexUsageRecordId, requestId);
+      } catch (codexLedgerError) {
+        console.error(
+          '[Codex Billing] Failed to finalize usage ledger:',
+          requestId,
+          codexLedgerError,
+        );
+      }
     }
 
     pruneRequestAnalytics({ db });

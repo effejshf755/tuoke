@@ -38,6 +38,17 @@ function getUserId(req: Request): number {
   ).user.userId;
 }
 
+userRouter.get('/codex-models', (_req, res) => {
+  const rows = getDb().prepare(`
+    SELECT DISTINCT am.model_id
+    FROM codex_oauth_account_models am
+    JOIN codex_oauth_accounts a ON a.id = am.account_id
+    WHERE am.enabled = 1 AND a.enabled = 1
+    ORDER BY am.model_id ASC
+  `).all() as Array<{ model_id: string }>;
+  res.json({ models: rows.map(row => row.model_id) });
+});
+
 function getBearerToken(
   req: Request,
 ): string | undefined {

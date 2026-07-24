@@ -73,6 +73,8 @@ export default function FallbackPage() {
   const { t } = useI18n()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const { data: authStatus } = useQuery<{ role: 'admin' | 'user' | null }>({ queryKey: ['auth-status'] })
+  const isAdmin = authStatus?.role === 'admin'
   const [localEntries, setLocalEntries] = useState<FallbackEntry[] | null>(null)
 
   // Catalog search + filter state (#343).
@@ -164,7 +166,7 @@ export default function FallbackPage() {
     }
     return true
   })
-  const draggable = isManual && !filtersActive
+  const draggable = isAdmin && isManual && !filtersActive
 
   // Progressive rendering: grow the row budget whenever the sentinel below the
   // table scrolls near the viewport (drag autoscroll extends it too).
@@ -251,7 +253,7 @@ export default function FallbackPage() {
           </div>
 
           <div className="inline-flex flex-wrap items-center gap-1 rounded-xl border p-1">
-            {STRATEGIES.map(s => (
+            {STRATEGIES.filter(s => isAdmin || s.key !== 'priority').map(s => (
               <Tooltip key={s.key} text={t(`strategies.${s.tKey}Blurb`)}>
                 <button
                   disabled={strategyMutation.isPending}
@@ -387,10 +389,10 @@ export default function FallbackPage() {
                     {renderedGroups.map(g => (
                       <tr
                         key={g.key}
-                        onClick={() => navigate(`/models/chat/${encodeURIComponent(g.members[0].canonicalId ?? g.members[0].modelId)}`)}
-                        className={`group/row border-b last:border-0 cursor-pointer transition-colors hover:[&>td]:bg-muted/50 [&>td:first-child]:rounded-l-lg [&>td:last-child]:rounded-r-lg ${g.members.some(m => m.enabled) ? '' : 'opacity-50'}`}
+                        onClick={isAdmin ? () => navigate(`/models/chat/${encodeURIComponent(g.members[0].canonicalId ?? g.members[0].modelId)}`) : undefined}
+                        className={`group/row border-b last:border-0 transition-colors [&>td:first-child]:rounded-l-lg [&>td:last-child]:rounded-r-lg ${isAdmin ? 'cursor-pointer hover:[&>td]:bg-muted/50' : 'cursor-default'} ${g.members.some(m => m.enabled) ? '' : 'opacity-50'}`}
                       >
-                        <GroupHeaderCells group={g} rank={rankByKey.get(g.key) ?? 0} onToggleGroup={handleGroupToggle} />
+                        <GroupHeaderCells group={g} rank={rankByKey.get(g.key) ?? 0} onToggleGroup={handleGroupToggle} canEdit={isAdmin} canViewDetails={isAdmin} />
                       </tr>
                     ))}
                   </tbody>
@@ -404,7 +406,7 @@ export default function FallbackPage() {
 
             {/* Floating action bar — fixed to the viewport so it's always visible,
                 sliding up when there are unsaved changes and back down on save/discard. */}
-            <FloatingBar show={hasChanges}>
+            <FloatingBar show={isAdmin && hasChanges}>
               <span className="text-xs text-muted-foreground">{t('common.unsavedChanges')}</span>
               <Button variant="outline" size="sm" onClick={() => setLocalEntries(null)}>{t('common.discard')}</Button>
               <Button size="sm" onClick={handleSave} disabled={saveMutation.isPending}>

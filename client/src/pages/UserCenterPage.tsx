@@ -20,11 +20,14 @@ type Expiration =
   | '90d'
   | 'custom'
 
+type KeyType = 'universal' | 'codex_pool'
+
 type Key = {
   id: number
   userId: number
   name: string
   keyPrefix: string
+  keyType: KeyType
   status: 'active' | 'revoked'
   enabled: 0 | 1
   createdAt: string
@@ -105,6 +108,11 @@ export default function UserCenterPage() {
   ] = useState<Expiration>('never')
 
   const [
+    keyType,
+    setKeyType,
+  ] = useState<KeyType>('universal')
+
+  const [
     customExpiresAt,
     setCustomExpiresAt,
   ] = useState('')
@@ -166,6 +174,7 @@ export default function UserCenterPage() {
         body: JSON.stringify({
           name: name.trim(),
           expiration,
+          key_type: keyType,
 
           ...(expiration === 'custom'
             ? {
@@ -182,6 +191,7 @@ export default function UserCenterPage() {
       setNewKey(response.key)
       setName('')
       setExpiration('never')
+      setKeyType('universal')
       setCustomExpiresAt('')
       setKeyError('')
 
@@ -463,7 +473,7 @@ export default function UserCenterPage() {
           API Keys
       ====================================================== */}
 
-      <div className="mt-6 rounded-3xl border bg-card p-6">
+      {false && <div className="mt-6 rounded-3xl border bg-card p-6">
         <h2 className="font-medium">
           我的 API 密钥
         </h2>
@@ -526,6 +536,18 @@ export default function UserCenterPage() {
               </option>
             </select>
           </div>
+
+          <fieldset className="sm:col-span-2 grid gap-2 rounded-2xl border p-4">
+            <legend className="px-2 text-xs font-medium">密钥类型</legend>
+            <label className="flex cursor-pointer gap-3 rounded-xl border p-3 text-sm">
+              <input type="radio" name="user-center-key-type" checked={keyType === 'universal'} onChange={() => setKeyType('universal')} />
+              <span><span className="block font-medium">普通模型调用</span><span className="text-xs text-muted-foreground">可调用平台开放模型，不包含 Codex 账号池。</span></span>
+            </label>
+            <label className="flex cursor-pointer gap-3 rounded-xl border p-3 text-sm">
+              <input type="radio" name="user-center-key-type" checked={keyType === 'codex_pool'} onChange={() => setKeyType('codex_pool')} />
+              <span><span className="block font-medium">Codex 账号池</span><span className="text-xs text-muted-foreground">使用 Codex OAuth 账号池资源。</span></span>
+            </label>
+          </fieldset>
         </div>
 
         {expiration ===
@@ -821,7 +843,7 @@ export default function UserCenterPage() {
               </p>
             )}
         </div>
-      </div>
+      </div>}
     </div>
   )
 }

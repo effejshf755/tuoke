@@ -154,14 +154,65 @@ export const dragDots = (
   </svg>
 )
 
+const modelBrandLogoFiles: Record<string, string> = {
+  deepseek: '/provider-logos/deepseek.svg',
+  openai: '/provider-logos/openai.svg',
+  meta: '/provider-logos/meta.svg',
+  qwen: '/provider-logos/qwen.svg',
+  google: '/provider-logos/google.svg',
+  mistral: '/provider-logos/mistral.svg',
+  nvidia: '/provider-logos/nvidia.svg',
+  ollama: '/provider-logos/ollama.svg',
+  openrouter: '/provider-logos/openrouter.svg',
+}
+
+const providerLogoColors: Record<string, string> = {
+  deepseek: 'border-[#4d6bfe]/60 bg-[#4d6bfe]', openai: 'border-white/25 bg-[#202123]',
+  meta: 'border-[#0866ff]/60 bg-[#0866ff]', qwen: 'border-[#615ced]/60 bg-[#615ced]',
+  google: 'border-[#4285f4]/60 bg-[#4285f4]', mistral: 'border-[#ff7000]/60 bg-[#ff7000]',
+  nvidia: 'border-[#76b900]/60 bg-[#76b900]', ollama: 'border-white/25 bg-[#252525]',
+  openrouter: 'border-white/25 bg-[#6566f1]', cohere: 'border-[#39594d]/60 bg-[#39594d]',
+  groq: 'border-[#f55036]/60 bg-[#f55036]', cerebras: 'border-[#f5c242]/60 bg-[#7c5b00]',
+  zhipu: 'border-[#16a9e0]/60 bg-[#075b78]', minimax: 'border-[#ff4d6d]/60 bg-[#b91c3b]',
+  kilo: 'border-fuchsia-400/50 bg-fuchsia-700', llm7: 'border-blue-400/50 bg-blue-700',
+  pollinations: 'border-pink-400/50 bg-pink-700',
+}
+
+function modelBrand(modelId: string, platform: string): string {
+  const id = modelId.toLowerCase()
+  if (id.includes('deepseek')) return 'deepseek'
+  if (/^(gpt|o[134])[-.]|codex|openai/.test(id)) return 'openai'
+  if (id.includes('llama')) return 'meta'
+  if (id.includes('qwen')) return 'qwen'
+  if (id.includes('gemini') || id.includes('gemma')) return 'google'
+  if (/(mistral|codestral|devstral|magistral|ministral)/.test(id)) return 'mistral'
+  if (id.includes('nemotron')) return 'nvidia'
+  if (id.includes('command')) return 'cohere'
+  if (id.includes('compound')) return 'groq'
+  if (id.includes('glm')) return 'zhipu'
+  if (id.includes('minimax')) return 'minimax'
+  return platform.toLowerCase()
+}
+
+export function ModelLogo({ modelId, platform, compact = false }: { modelId: string; platform: string; compact?: boolean }) {
+  const brand = modelBrand(modelId, platform)
+  const logo = modelBrandLogoFiles[brand]
+  const label = brand === 'openai' ? 'AI' : brand.slice(0, 2).toUpperCase()
+  return <span title={`${brand} · ${modelId}`} className={`flex ${compact ? 'size-5 rounded-[5px]' : 'size-7 rounded-md'} shrink-0 items-center justify-center border text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.24),0_2px_8px_rgba(0,0,0,0.28)] ${providerLogoColors[brand] ?? 'border-white/20 bg-neutral-700'}`}>
+    {logo ? <img src={logo} alt="" className={`${compact ? 'size-3' : 'size-4'} object-contain brightness-0 invert`} /> : <span className={`${compact ? 'text-[7px]' : 'text-[9px]'} font-bold leading-none`}>{label}</span>}
+  </span>
+}
+
 // The collapsed header row for a logical-model group: name, provider count,
 // union vision/tools badges, the best member's axis bars + score, and a single
 // switch that enables/disables every provider in the group.
-export function GroupHeaderCells({ group, rank, dragHandle, onToggleGroup }: {
+export function GroupHeaderCells({ group, rank, dragHandle, onToggleGroup, canEdit = true, canViewDetails = true }: {
   group: ModelGroupRow
   rank: number
   dragHandle?: ReactNode
   onToggleGroup: (memberIds: number[], enabled: boolean) => void
+  canEdit?: boolean
+  canViewDetails?: boolean
 }) {
   const { t } = useI18n()
   const anyEnabled = group.members.some(m => m.enabled)
@@ -183,7 +234,8 @@ export function GroupHeaderCells({ group, rank, dragHandle, onToggleGroup }: {
       <td className="py-2 pr-2 w-6 text-center font-mono text-xs text-muted-foreground tabular-nums align-middle">{rank}</td>
       <td className="py-2 pr-3 align-middle">
         <div className="flex items-center gap-1.5 min-w-0">
-          <Link to={`/models/chat/${detailId}`} aria-label={t('models.viewProviders')} onClick={e => e.stopPropagation()} className="flex items-center gap-2 flex-wrap text-left min-w-0">
+          <Link to={canViewDetails ? `/models/chat/${detailId}` : '#'} aria-label={canViewDetails ? t('models.viewProviders') : undefined} aria-disabled={!canViewDetails} onClick={e => { e.stopPropagation(); if (!canViewDetails) e.preventDefault() }} className={`flex items-center gap-2 flex-wrap text-left min-w-0 ${canViewDetails ? '' : 'cursor-default'}`}>
+            <ModelLogo modelId={copyId} platform={group.members[0].platform} />
             <span className="font-medium text-sm">{group.label}</span>
             {solo
               ? <span className="text-xs text-muted-foreground">{providerLabel(group.members[0])}</span>
@@ -224,7 +276,7 @@ export function GroupHeaderCells({ group, rank, dragHandle, onToggleGroup }: {
       <td className="py-2 pr-3 align-middle font-mono text-[11px] text-muted-foreground tabular-nums">{guard < 0.999 ? `×${guard.toFixed(2)}` : '—'}</td>
       <td className="py-2 pr-3 align-middle text-right font-mono text-xs font-medium tabular-nums">{best.score !== undefined ? best.score.toFixed(3) : '–'}</td>
       <td className="py-2 pr-3 align-middle text-right" onClick={e => e.stopPropagation()}>
-        <Switch checked={anyEnabled} onCheckedChange={(c) => onToggleGroup(group.members.map(m => m.modelDbId), c)} />
+        <Switch checked={anyEnabled} disabled={!canEdit} onCheckedChange={(c) => onToggleGroup(group.members.map(m => m.modelDbId), c)} />
       </td>
     </>
   )

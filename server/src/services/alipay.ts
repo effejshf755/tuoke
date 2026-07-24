@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import type { Db } from '../db/types.js';
+import { activateRechargedFreeTier } from './free-model-access.js';
 
 type AlipayConfig = {
   appId: string;
@@ -86,6 +87,7 @@ export function settleAlipayOrder(db: Db, orderNo: string, tradeNo: string, note
     const updated = db.prepare("UPDATE recharge_orders SET status='paid', payment_provider='alipay', provider_trade_no=?, note=?, paid_at=datetime('now'), updated_at=datetime('now') WHERE id=? AND status='pending'").run(tradeNo, note, order.id);
     if (updated.changes !== 1) return { status: 'already_paid' as const };
     db.prepare('UPDATE users SET balance_micro = ? WHERE id = ?').run(balance, order.userId);
+    activateRechargedFreeTier(db, order.userId, order.amountMicro);
     db.prepare("INSERT INTO wallet_transactions (user_id, type, delta_micro, balance_after_micro, note) VALUES (?, 'recharge', ?, ?, ?)").run(order.userId, order.amountMicro, balance, `Alipay recharge ${orderNo}`);
     return { status: 'paid' as const, amountMicro: order.amountMicro, balanceAfterMicro: balance };
   })();

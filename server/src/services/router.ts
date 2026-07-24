@@ -1,6 +1,7 @@
 import { getDb, getSetting, setSetting } from '../db/index.js';
 import { getProvider, hasProvider, resolveProvider } from '../providers/index.js';
 import { decrypt } from '../lib/crypto.js';
+import { getClientContext } from '../lib/client-context.js';
 import {
   canMakeRequest,
   canUseTokens,
@@ -118,6 +119,7 @@ export interface ChainRow {
   enabled: number;
   platform: string;
   model_id: string;
+  upstream_model_id: string | null;
   display_name: string;
   intelligence_rank: number;
   size_label: string;
@@ -173,6 +175,7 @@ export function routingReserveTokens(requestedMaxTokens: number | null | undefin
 
 // Round-robin index per platform
 const roundRobinIndex = new Map<string, number>();
+let codexPoolRoundRobinIndex = 0;
 
 // ── Dynamic priority: track 429s per model and demote accordingly ──
 // Key: model_db_id → { count, lastHit, penalty }
@@ -253,18 +256,23 @@ const STRATEGY_KEY = 'routing_strategy';
 const CUSTOM_WEIGHTS_KEY = 'routing_custom_weights';
 const VALID_STRATEGIES: RoutingStrategy[] = ['priority', 'balanced', 'smartest', 'fastest', 'reliable', 'custom'];
 
-export function getRoutingStrategy(): RoutingStrategy {
-  const raw = getSetting(STRATEGY_KEY);
+function userSettingKey(key: string, userId?: number | null): string {
+  const resolvedUserId = userId === undefined ? getClientContext().consumerUserId : userId;
+  return resolvedUserId == null ? key : `${key}_user_${resolvedUserId}`;
+}
+
+export function getRoutingStrategy(userId?: number | null): RoutingStrategy {
+  const raw = getSetting(userSettingKey(STRATEGY_KEY, userId));
   return (raw && VALID_STRATEGIES.includes(raw as RoutingStrategy))
     ? (raw as RoutingStrategy)
     : DEFAULT_STRATEGY;
 }
 
-export function setRoutingStrategy(strategy: RoutingStrategy): void {
+export function setRoutingStrategy(strategy: RoutingStrategy, userId?: number | null): void {
   if (!VALID_STRATEGIES.includes(strategy)) {
     throw new Error(`Unknown routing strategy: ${strategy}`);
   }
-  setSetting(STRATEGY_KEY, strategy);
+  setSetting(userSettingKey(STRATEGY_KEY, userId), strategy);
 }
 
 // ── Custom weights (persisted) ──────────────────────────────────────────────
@@ -272,8 +280,8 @@ export function setRoutingStrategy(strategy: RoutingStrategy): void {
 // to 1) so the dashboard percentages read cleanly; combineScore would tolerate
 // any non-negative vector regardless. Falls back to the balanced preset until
 // the user has saved their own.
-export function getCustomWeights(): RoutingWeights {
-  const raw = getSetting(CUSTOM_WEIGHTS_KEY);
+export function getCustomWeights(userId?: number | null): RoutingWeights {
+  const raw = getSetting(userSettingKey(CUSTOM_WEIGHTS_KEY, userId));
   if (raw) {
     try {
       const w = JSON.parse(raw) as RoutingWeights;
@@ -288,7 +296,7 @@ export function getCustomWeights(): RoutingWeights {
   return { ...BANDIT_PRESETS.balanced };
 }
 
-export function setCustomWeights(weights: RoutingWeights): void {
+export function setCustomWeights(weights: RoutingWeights, userId?: number | null): void {
   const { reliability, speed, intelligence } = weights;
   if (![reliability, speed, intelligence].every(v => Number.isFinite(v) && v >= 0)) {
     throw new Error('Custom weights must be non-negative numbers');
@@ -297,16 +305,16 @@ export function setCustomWeights(weights: RoutingWeights): void {
   if (sum <= 0) {
     throw new Error('Custom weights must not all be zero');
   }
-  setSetting(CUSTOM_WEIGHTS_KEY, JSON.stringify({
+  setSetting(userSettingKey(CUSTOM_WEIGHTS_KEY, userId), JSON.stringify({
     reliability: reliability / sum,
     speed: speed / sum,
     intelligence: intelligence / sum,
   }));
 }
 
-function weightsFor(strategy: RoutingStrategy): RoutingWeights | null {
+function weightsFor(strategy: RoutingStrategy, userId?: number | null): RoutingWeights | null {
   if (strategy === 'priority') return null;
-  if (strategy === 'custom') return getCustomWeights();
+  if (strategy === 'custom') return getCustomWeights(userId);
   return BANDIT_PRESETS[strategy];
 }
 
@@ -548,7 +556,7 @@ function getActiveChain(db: Db): ChainRow[] {
   if (profileId != null) {
     const chain = db.prepare(`
       SELECT pm.model_db_id, pm.priority, pm.enabled,
-             m.platform, m.model_id, m.display_name, m.intelligence_rank,
+             m.platform, m.model_id, m.upstream_model_id, m.display_name, m.intelligence_rank,
              m.size_label, m.monthly_token_budget,
              m.rpm_limit, m.rpd_limit, m.tpm_limit, m.tpd_limit, m.supports_vision,
              m.supports_tools, m.context_window, m.key_id
@@ -563,7 +571,7 @@ function getActiveChain(db: Db): ChainRow[] {
 
   return db.prepare(`
     SELECT fc.model_db_id, fc.priority, fc.enabled,
-           m.platform, m.model_id, m.display_name, m.intelligence_rank,
+           m.platform, m.model_id, m.upstream_model_id, m.display_name, m.intelligence_rank,
            m.size_label, m.monthly_token_budget,
            m.rpm_limit, m.rpd_limit, m.tpm_limit, m.tpd_limit, m.supports_vision,
            m.supports_tools, m.context_window, m.key_id
@@ -579,7 +587,7 @@ function getChainByProfileName(db: Db, name: string): ChainRow[] | null {
 
   return db.prepare(`
     SELECT pm.model_db_id, pm.priority, pm.enabled,
-           m.platform, m.model_id, m.display_name, m.intelligence_rank,
+           m.platform, m.model_id, m.upstream_model_id, m.display_name, m.intelligence_rank,
            m.size_label, m.monthly_token_budget,
            m.rpm_limit, m.rpd_limit, m.tpm_limit, m.tpd_limit, m.supports_vision,
            m.supports_tools, m.context_window, m.key_id
@@ -593,7 +601,7 @@ function getChainByProfileName(db: Db, name: string): ChainRow[] | null {
 function getChainByGlobalSort(db: Db, globalAxis: string): ChainRow[] {
   const allEnabled = db.prepare(`
     SELECT m.id as model_db_id, 0 as priority, 1 as enabled,
-           m.platform, m.model_id, m.display_name, m.intelligence_rank,
+           m.platform, m.model_id, m.upstream_model_id, m.display_name, m.intelligence_rank,
            m.size_label, m.monthly_token_budget,
            m.rpm_limit, m.rpd_limit, m.tpm_limit, m.tpd_limit, m.supports_vision,
            m.supports_tools, m.context_window, m.key_id
@@ -672,12 +680,84 @@ export function resolveRoutingChain(modelString: string | undefined): ResolvedCh
 function selectKeyForModel(entry: ChainRow, estimatedTokens: number, skipKeys?: Set<string>, diag?: string[]): RouteResult | null {
   const db = getDb();
   const label = `${entry.platform}/${entry.model_id}`;
+  const providerModelId = entry.upstream_model_id?.trim() || entry.model_id;
+  const consumerKeyType = getClientContext().consumerApiKeyType;
+
+  if (consumerKeyType === 'codex_pool' && entry.platform !== 'openai-codex') {
+    diag?.push(`${label}: Codex pool API key cannot use ordinary providers`);
+    return null;
+  }
 
   if (!hasProvider(entry.platform as Platform)) {
     diag?.push(`${label}: no provider registered`);
     return null;
   }
   const provider = getProvider(entry.platform as Platform)!;
+
+  // Codex is a dynamic account/model pool. Select one enabled capability from
+  // a healthy account and pass only the database account id to the provider;
+  // the provider still owns token decryption. upstream_model_id remains
+  // available for ordinary providers but no longer pins the Codex alias.
+  if (entry.platform === 'openai-codex') {
+    if (consumerKeyType && consumerKeyType !== 'codex_pool') {
+      diag?.push(`${label}: consumer API key does not have Codex pool access`);
+      return null;
+    }
+
+    const capabilities = db.prepare(`
+      SELECT a.id AS account_id, am.model_id
+      FROM codex_oauth_accounts a
+      JOIN codex_oauth_account_models am ON am.account_id = a.id
+      JOIN model_billing_rules b
+        ON b.platform = 'openai-codex'
+       AND b.model_id = am.model_id
+       AND b.billing_enabled = 1
+      WHERE a.enabled = 1
+        AND a.status IN ('healthy', 'unknown')
+        AND (a.cooldown_until IS NULL OR a.cooldown_until <= datetime('now'))
+        AND (
+          a.quota_remaining_percent IS NULL
+          OR a.quota_remaining_percent > 0
+          OR (a.quota_reset_at IS NOT NULL AND datetime(a.quota_reset_at) <= datetime('now'))
+        )
+        AND am.enabled = 1
+      ORDER BY
+        CASE WHEN am.model_id LIKE 'gpt-%' THEN 0 ELSE 1 END,
+        COALESCE(a.last_used_at, '1970-01-01') ASC,
+        a.id ASC,
+        am.model_id ASC
+    `).all() as Array<{ account_id: number; model_id: string }>;
+
+    if (capabilities.length === 0) {
+      diag?.push(`${label}: no enabled codex oauth account with a discovered model`);
+      return null;
+    }
+
+    const available = capabilities.filter((candidate) => (
+      !skipKeys?.has(`${entry.platform}:${candidate.model_id}:${-candidate.account_id}`)
+    ));
+    if (available.length === 0) {
+      diag?.push(`${label}: all eligible codex oauth accounts already failed this request`);
+      return null;
+    }
+
+    const selected = available[codexPoolRoundRobinIndex % available.length];
+    codexPoolRoundRobinIndex = (codexPoolRoundRobinIndex + 1) % available.length;
+
+    return {
+      provider,
+      modelId: selected.model_id,
+      modelDbId: entry.model_db_id,
+      apiKey: `codex-account:${selected.account_id}`,
+      // Negative ids distinguish OAuth accounts from ordinary api_keys while
+      // keeping RouteResult.keyId numeric for the shared fallback machinery.
+      keyId: -selected.account_id,
+      platform: entry.platform,
+      displayName: entry.display_name,
+      rpdLimit: entry.rpd_limit,
+      tpdLimit: entry.tpd_limit,
+    };
+  }
 
   const keys = db.prepare(
     "SELECT * FROM api_keys WHERE platform = ? AND enabled = 1 AND status IN ('healthy', 'unknown')"
@@ -737,7 +817,7 @@ function selectKeyForModel(entry: ChainRow, estimatedTokens: number, skipKeys?: 
     roundRobinIndex.set(rrKey, idx);
     return {
       provider: resolvedProvider,
-      modelId: entry.model_id,
+      modelId: providerModelId,
       modelDbId: entry.model_db_id,
       apiKey: decryptedKey,
       keyId: key.id,
@@ -783,6 +863,33 @@ export function hasOtherUsableKey(modelDbId: number, excludingKeyId: number, ski
   } | undefined;
   if (!m) return false;
 
+  if (m.platform === 'openai-codex') {
+    const accounts = db.prepare(`
+      SELECT DISTINCT a.id, am.model_id
+      FROM codex_oauth_accounts a
+      JOIN codex_oauth_account_models am
+        ON am.account_id = a.id AND am.enabled = 1
+      JOIN model_billing_rules b
+        ON b.platform = 'openai-codex'
+       AND b.model_id = am.model_id
+       AND b.billing_enabled = 1
+      WHERE a.enabled = 1
+        AND a.status IN ('healthy', 'unknown')
+        AND (a.cooldown_until IS NULL OR a.cooldown_until <= datetime('now'))
+        AND (
+          a.quota_remaining_percent IS NULL
+          OR a.quota_remaining_percent > 0
+          OR (a.quota_reset_at IS NOT NULL AND datetime(a.quota_reset_at) <= datetime('now'))
+        )
+    `).all() as Array<{ id: number; model_id: string }>;
+
+    return accounts.some((account) => {
+      const routeKeyId = -account.id;
+      return routeKeyId !== excludingKeyId
+        && !skipKeys?.has(`${m.platform}:${account.model_id}:${routeKeyId}`);
+    });
+  }
+
   const limits = { rpm: m.rpm_limit, rpd: m.rpd_limit, tpm: m.tpm_limit, tpd: m.tpd_limit };
   const keys = db.prepare(
     "SELECT id FROM api_keys WHERE platform = ? AND enabled = 1 AND status IN ('healthy', 'unknown')"
@@ -813,7 +920,7 @@ export function hasOtherUsableKey(modelDbId: number, excludingKeyId: number, ski
 function getModelChainRow(db: Db, modelDbId: number): ChainRow | undefined {
   return db.prepare(`
     SELECT m.id as model_db_id, 0 as priority, 1 as enabled,
-           m.platform, m.model_id, m.display_name, m.intelligence_rank,
+           m.platform, m.model_id, m.upstream_model_id, m.display_name, m.intelligence_rank,
            m.size_label, m.monthly_token_budget,
            m.rpm_limit, m.rpd_limit, m.tpm_limit, m.tpd_limit, m.supports_vision,
            m.supports_tools, m.context_window, m.key_id
@@ -863,7 +970,7 @@ export function resolveModelGroupCandidates(memberDbIds: number[]): ChainRow[] {
     ? db.prepare(`
       SELECT m.id as model_db_id, COALESCE(fc.priority, 0) as priority,
              1 as enabled,
-             m.platform, m.model_id, m.display_name, m.intelligence_rank,
+             m.platform, m.model_id, m.upstream_model_id, m.display_name, m.intelligence_rank,
              m.size_label, m.monthly_token_budget,
              m.rpm_limit, m.rpd_limit, m.tpm_limit, m.tpd_limit, m.supports_vision,
              m.supports_tools, m.context_window, m.key_id
@@ -874,7 +981,7 @@ export function resolveModelGroupCandidates(memberDbIds: number[]): ChainRow[] {
     : db.prepare(`
       SELECT m.id as model_db_id, COALESCE(pm.priority, fc.priority, 0) as priority,
              1 as enabled,
-             m.platform, m.model_id, m.display_name, m.intelligence_rank,
+             m.platform, m.model_id, m.upstream_model_id, m.display_name, m.intelligence_rank,
              m.size_label, m.monthly_token_budget,
              m.rpm_limit, m.rpd_limit, m.tpm_limit, m.tpd_limit, m.supports_vision,
              m.supports_tools, m.context_window, m.key_id
@@ -1040,7 +1147,7 @@ export function routeRequest(estimatedTokens = 1000, skipKeys?: Set<string>, pre
       // explicit request by injecting it at the front.
       const pinnedRow = db.prepare(`
         SELECT m.id as model_db_id, 0 as priority, 1 as enabled,
-               m.platform, m.model_id, m.display_name, m.intelligence_rank,
+               m.platform, m.model_id, m.upstream_model_id, m.display_name, m.intelligence_rank,
                m.size_label, m.monthly_token_budget,
                m.rpm_limit, m.rpd_limit, m.tpm_limit, m.tpd_limit, m.supports_vision,
                m.supports_tools, m.context_window, m.key_id
@@ -1137,16 +1244,16 @@ export interface RoutingScore {
   totalRequests: number; // decay-weighted observations
 }
 
-export function getRoutingScores(): { strategy: RoutingStrategy; weights: RoutingWeights | null; customWeights: RoutingWeights; scores: RoutingScore[] } {
+export function getRoutingScores(userId?: number | null): { strategy: RoutingStrategy; weights: RoutingWeights | null; customWeights: RoutingWeights; scores: RoutingScore[] } {
   const db = getDb();
-  const strategy = getRoutingStrategy();
+  const strategy = getRoutingStrategy(userId);
   refreshStatsCache(db);
 
   const chain = getActiveChain(db);
 
   // For display we score under 'balanced' weights when in priority mode, so the
   // table still shows a meaningful ranking even with the bandit turned off.
-  const weights = weightsFor(strategy) ?? BANDIT_PRESETS.balanced;
+  const weights = weightsFor(strategy, userId) ?? BANDIT_PRESETS.balanced;
   const composites = chain.map(e => intelligenceComposite(e.size_label, e.intelligence_rank));
   const intelMin = composites.length ? Math.min(...composites) : 0;
   const intelMax = composites.length ? Math.max(...composites) : 0;
@@ -1175,7 +1282,7 @@ export function getRoutingScores(): { strategy: RoutingStrategy; weights: Routin
   // so the dashboard's custom-weight sliders can render even before the user
   // has saved their own — distinct from `weights`, which is null in priority
   // mode and the active preset otherwise.
-  return { strategy, weights: weightsFor(strategy), customWeights: getCustomWeights(), scores };
+  return { strategy, weights: weightsFor(strategy, userId), customWeights: getCustomWeights(userId), scores };
 }
 
 // Whether at least one vision-capable model is enabled in the fallback chain.

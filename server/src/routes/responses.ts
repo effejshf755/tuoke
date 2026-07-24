@@ -92,6 +92,14 @@ const inputItemSchema = z.union([
   functionCallItemSchema,
   functionCallOutputItemSchema,
   messageItemSchema,
+  // Responses clients may replay output-only history items such as
+  // reasoning, item_reference, web_search_call, etc. They are not directly
+  // translatable to chat messages, but rejecting the whole request makes a
+  // valid following user message unusable. Keep them for the conversion layer
+  // to safely ignore.
+  z.record(z.string(), z.unknown()),
+  // Some compatible clients use a compact string array for multi-turn input.
+  z.string(),
 ]);
 
 // Accept ANY tool type, not just 'function'. Codex (Responses API) sends
@@ -139,10 +147,18 @@ type ResponsesRequest = z.infer<typeof responsesRequestSchema>;
 
 // Responses content parts → plain text. input_text / output_text both carry
 // `text`; other part types (images, etc.) are dropped (parity with the proxy).
-function partsToString(content: string | Array<{ type: string; text?: unknown }>): string {
+function partsToString(content: unknown): string {
   if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
   return content
-    .map((p) => (typeof p.text === 'string' ? p.text : ''))
+    .map((p) => {
+      if (typeof p === 'string') return p;
+      if (!p || typeof p !== 'object') return '';
+      const part = p as { text?: unknown; content?: unknown };
+      if (typeof part.text === 'string') return part.text;
+      if (typeof part.content === 'string') return part.content;
+      return '';
+    })
     .join('');
 }
 
@@ -178,7 +194,16 @@ export function toChatMessages(req: ResponsesRequest): ChatMessage[] {
   }
 
   for (const item of req.input) {
-    if ('type' in item && item.type === 'function_call') {
+    if (typeof item === 'string') {
+      messages.push({ role: 'user', content: item });
+      continue;
+    }
+    if (!item || typeof item !== 'object') continue;
+
+    if ('type' in item && item.type === 'function_call'
+      && typeof item.call_id === 'string'
+      && typeof item.name === 'string'
+      && typeof item.arguments === 'string') {
       messages.push({
         role: 'assistant',
         content: null,
@@ -188,20 +213,25 @@ export function toChatMessages(req: ResponsesRequest): ChatMessage[] {
           function: { name: item.name, arguments: item.arguments },
         }],
       });
-    } else if ('type' in item && item.type === 'function_call_output') {
+    } else if ('type' in item && item.type === 'function_call_output'
+      && typeof item.call_id === 'string') {
       const output = typeof item.output === 'string'
         ? item.output
         : Array.isArray(item.output)
           ? partsToString(item.output as any)
           : JSON.stringify(item.output);
       messages.push({ role: 'tool', tool_call_id: item.call_id, content: output });
-    } else {
-      // message item
-      const m = item as z.infer<typeof messageItemSchema>;
+    } else if (
+      typeof (item as { role?: unknown }).role === 'string'
+      && ['system', 'developer', 'user', 'assistant'].includes(String((item as { role?: unknown }).role))
+      && 'content' in item
+    ) {
+      const m = item as { role: 'system' | 'developer' | 'user' | 'assistant'; content: unknown };
       // 'developer' is the Responses-era system role.
       const role = m.role === 'developer' ? 'system' : m.role;
       messages.push({ role, content: partsToString(m.content) });
     }
+    // Unsupported history-only Responses items are intentionally ignored.
   }
 
   return messages;

@@ -5,6 +5,7 @@ import { OpenAICompatProvider } from './openai-compat.js';
 import { CohereProvider } from './cohere.js';
 import { CloudflareProvider } from './cloudflare.js';
 import { AIHordeProvider } from './aihorde.js';
+import { OpenAICodexProvider } from './openai-codex.js';
 
 const providers = new Map<Platform, BaseProvider>();
 
@@ -361,6 +362,8 @@ register(new OpenAICompatProvider({
   name: 'Custom (OpenAI-compatible)',
   baseUrl: '',
 }));
+
+register(new OpenAICodexProvider());
 
 // Locally-hosted inference (llama.cpp / vLLM / Ollama on CPU) can be slow, so
 // custom providers get the same extended timeout as Ollama Cloud.

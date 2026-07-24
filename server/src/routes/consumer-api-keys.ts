@@ -46,6 +46,10 @@ const createSchema = z.object({
     .string()
     .trim()
     .optional(),
+
+  key_type: z
+    .enum(['universal', 'codex_pool'])
+    .default('universal'),
 });
 
 /**
@@ -256,6 +260,7 @@ consumerApiKeysRouter.post(
         userId,
         parsed.data.name,
         expiresAt,
+        parsed.data.key_type,
       );
 
     /**

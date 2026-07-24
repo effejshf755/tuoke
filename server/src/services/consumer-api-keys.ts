@@ -9,6 +9,7 @@ export interface ConsumerApiKey {
   userId: number;
   name: string;
   keyPrefix: string;
+  keyType: 'universal' | 'codex_pool';
 
   status:
     | 'active'
@@ -38,6 +39,7 @@ interface StoredKey {
   name: string;
   keyPrefix: string;
   keyHash: string;
+  keyType: 'universal' | 'codex_pool';
 
   status:
     | 'active'
@@ -73,6 +75,7 @@ function toRecord(
     userId: row.userId,
     name: row.name,
     keyPrefix: row.keyPrefix,
+    keyType: row.keyType,
     status: row.status,
 
     enabled:
@@ -205,6 +208,9 @@ export function listConsumerApiKeys(
         k.key_hash
           AS keyHash,
 
+        k.key_type
+          AS keyType,
+
         k.status,
         k.enabled,
 
@@ -321,6 +327,7 @@ export function createConsumerApiKey(
   userId: number,
   name: string,
   expiresAt?: string | null,
+  keyType: 'universal' | 'codex_pool' = 'universal',
 ): CreatedConsumerApiKey {
   const key =
     `${KEY_PREFIX}${
@@ -349,7 +356,8 @@ export function createConsumerApiKey(
           key_prefix,
           key_hash,
           expires_at,
-          enabled
+          enabled,
+          key_type
         )
 
       VALUES (
@@ -358,7 +366,8 @@ export function createConsumerApiKey(
         ?,
         ?,
         ?,
-        1
+        1,
+        ?
       )
     `)
     .run(
@@ -367,6 +376,7 @@ export function createConsumerApiKey(
       keyPrefix,
       hashKey(key),
       expiresAt ?? null,
+      keyType,
     );
 
   const row = db
@@ -384,6 +394,9 @@ export function createConsumerApiKey(
 
         key_hash
           AS keyHash,
+
+        key_type
+          AS keyType,
 
         status,
         enabled,
@@ -464,6 +477,9 @@ export function validateConsumerApiKey(
 
         k.key_hash
           AS keyHash,
+
+        k.key_type
+          AS keyType,
 
         k.status,
         k.enabled,

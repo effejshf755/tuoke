@@ -42,7 +42,7 @@ export function AddKeyDialog({ open, onOpenChange }: { open: boolean; onOpenChan
           className="mb-5"
         />
 
-        {pane === 'provider' && <AddKeyForm onSuccess={close} />}
+        {pane === 'provider' && <AddKeyForm />}
         {pane === 'import' && <ImportKeysSection onImported={close} />}
         {pane === 'custom' && <CustomProviderSection onAdded={close} />}
       </DialogPopup>

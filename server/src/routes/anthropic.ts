@@ -815,12 +815,20 @@ anthropicRouter.get('/models', (req: Request, res: Response, next: NextFunction)
   if (!authenticate(req, res)) return;
 
   const token = extractApiToken(req);
-  const { models } = token && validateConsumerApiKey(getDb(), token)
+  const consumerKey = token ? validateConsumerApiKey(getDb(), token) : null;
+  const { models } = consumerKey
     ? filterModelListingForConsumer(buildModelListing())
     : buildModelListing();
+  const visibleModels = consumerKey
+    ? models.filter(model => consumerKey.keyType === 'codex_pool'
+      ? model.id === 'codex'
+      : model.id !== 'codex')
+    : models;
   const data = [
-    { type: 'model' as const, id: 'auto', display_name: 'Auto (router picks the best available model)', created_at: MODEL_CREATED_AT },
-    ...models
+    ...(consumerKey?.keyType === 'codex_pool'
+      ? []
+      : [{ type: 'model' as const, id: 'auto', display_name: 'Auto (router picks the best available model)', created_at: MODEL_CREATED_AT }]),
+    ...visibleModels
       .filter(m => m.available === 1)
       .map(m => ({ type: 'model' as const, id: m.id, display_name: m.name, created_at: MODEL_CREATED_AT })),
   ];

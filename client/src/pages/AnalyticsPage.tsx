@@ -176,8 +176,9 @@ const chartVars = `
 .dark .analytics-viz { --series-a: #3987e5; --series-b: #199e70; }
 `
 
-export default function AnalyticsPage() {
+export default function AnalyticsPage({ userScope = false }: { userScope?: boolean }) {
   const { t } = useI18n()
+  const apiBase = userScope ? '/api/user/analytics' : '/api/analytics'
   const refreshOptions = { refetchInterval: 5000 }
   const [range, setRange] = useState<TimeRange>('7d')
   // Capture "now" once at mount so the savings extrapolation below stays a pure
@@ -185,45 +186,45 @@ export default function AnalyticsPage() {
   const [now] = useState(() => Date.now())
 
   const { data: summary, isLoading: summaryLoading } = useQuery({
-    queryKey: ['analytics', 'summary', range],
-    queryFn: () => apiFetch<SummaryResponse>(`/api/analytics/summary?range=${range}`),
+    queryKey: ['analytics', apiBase, 'summary', range],
+    queryFn: () => apiFetch<SummaryResponse>(`${apiBase}/summary?range=${range}`),
     ...refreshOptions,
   })
 
   const { data: byPlatform = [] } = useQuery({
-    queryKey: ['analytics', 'by-platform', range],
-    queryFn: () => apiFetch<ByPlatformRow[]>(`/api/analytics/by-platform?range=${range}`),
+    queryKey: ['analytics', apiBase, 'by-platform', range],
+    queryFn: () => apiFetch<ByPlatformRow[]>(`${apiBase}/by-platform?range=${range}`),
   })
 
   const { data: timeline = [] } = useQuery({
-    queryKey: ['analytics', 'timeline', range],
-    queryFn: () => apiFetch<TimelineBucket[]>(`/api/analytics/timeline?range=${range}`),
+    queryKey: ['analytics', apiBase, 'timeline', range],
+    queryFn: () => apiFetch<TimelineBucket[]>(`${apiBase}/timeline?range=${range}`),
   })
 
   const { data: byModel = [] } = useQuery({
-    queryKey: ['analytics', 'by-model', range],
-    queryFn: () => apiFetch<ByModelRow[]>(`/api/analytics/by-model?range=${range}`),
+    queryKey: ['analytics', apiBase, 'by-model', range],
+    queryFn: () => apiFetch<ByModelRow[]>(`${apiBase}/by-model?range=${range}`),
     ...refreshOptions,
   })
 
   const { data: byKey = [] } = useQuery({
-    queryKey: ['analytics', 'by-key', range],
-    queryFn: () => apiFetch<ByKeyRow[]>(`/api/analytics/by-key?range=${range}`),
+    queryKey: ['analytics', apiBase, 'by-key', range],
+    queryFn: () => apiFetch<ByKeyRow[]>(`${apiBase}/by-key?range=${range}`),
   })
 
   const { data: errors = [] } = useQuery({
-    queryKey: ['analytics', 'errors', range],
-    queryFn: () => apiFetch<RecentErrorRow[]>(`/api/analytics/errors?range=${range}`),
+    queryKey: ['analytics', apiBase, 'errors', range],
+    queryFn: () => apiFetch<RecentErrorRow[]>(`${apiBase}/errors?range=${range}`),
   })
 
   const { data: errorDist } = useQuery({
-    queryKey: ['analytics', 'error-distribution', range],
-    queryFn: () => apiFetch<ErrorDistribution>(`/api/analytics/error-distribution?range=${range}`),
+    queryKey: ['analytics', apiBase, 'error-distribution', range],
+    queryFn: () => apiFetch<ErrorDistribution>(`${apiBase}/error-distribution?range=${range}`),
   })
 
   const { data: recentCalls } = useQuery({
-    queryKey: ['analytics', 'requests', range],
-    queryFn: () => apiFetch<RecentCallsResponse>(`/api/analytics/requests?range=${range}&limit=100`),
+    queryKey: ['analytics', apiBase, 'requests', range],
+    queryFn: () => apiFetch<RecentCallsResponse>(`${apiBase}/requests?range=${range}&limit=100`),
   })
 
   // Savings card shows ONE stable monthly figure regardless of the selected
@@ -234,8 +235,8 @@ export default function AnalyticsPage() {
   // basis. Querying 30d separately is free: react-query shares the cache
   // with the 30d tab.
   const { data: summary30 } = useQuery({
-    queryKey: ['analytics', 'summary', '30d'],
-    queryFn: () => apiFetch<SummaryResponse>(`/api/analytics/summary?range=30d`),
+    queryKey: ['analytics', apiBase, 'summary', '30d'],
+    queryFn: () => apiFetch<SummaryResponse>(`${apiBase}/summary?range=30d`),
   })
   const actualSavings = summary?.estimatedCostSavings ?? 0
   const baseSavings = summary30?.estimatedCostSavings ?? 0

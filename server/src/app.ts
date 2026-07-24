@@ -22,9 +22,12 @@ import { docsRouter } from './routes/docs.js';
 import { mcpRouter } from './routes/mcp.js';
 import { consumerApiKeysRouter } from './routes/consumer-api-keys.js';
 import { userRouter } from './routes/user.js';
+import { userAnalyticsRouter } from './routes/user-analytics.js';
 import { userWalletRouter } from './routes/user-wallet.js';
 import { userRechargeRouter, adminRechargeRouter, alipayNotifyRouter } from './routes/recharge.js';
 import { adminUsersRouter } from './routes/admin-users.js';
+import { codexOauthRouter } from './routes/codex-oauth.js';
+import { codexAuthRouter } from './routes/codex-auth.js';
 import { adminBillingRouter } from './routes/admin-billing.js';
 import { adminWalletRouter } from './routes/admin-wallet.js';
 import { adminDashboardRouter } from './routes/admin-dashboard.js';
@@ -89,7 +92,7 @@ export function createApp(config?: Config) {
   app.use('/api/keys', requireAuth, requireAdmin, keysRouter);
   app.use('/api/models', requireAuth, requireAdmin, modelsRouter);
   app.use('/api/profiles', requireAuth, requireAdmin, profilesRouter);
-  app.use('/api/fallback', requireAuth, requireAdmin, fallbackRouter);
+  app.use('/api/fallback', requireAuth, fallbackRouter);
   app.use('/api/embeddings', requireAuth, requireAdmin, embeddingsRouter);
   app.use('/api/media', requireAuth, requireAdmin, mediaRouter);
   app.use('/api/analytics', requireAuth, requireAdmin, analyticsRouter);
@@ -101,12 +104,15 @@ export function createApp(config?: Config) {
   app.use('/api/user/wallet', requireAuth, userWalletRouter);
   app.use('/api/user/recharge', requireAuth, userRechargeRouter);
   app.use('/api/user', requireAuth, userRouter);
+  app.use('/api/user/analytics', requireAuth, userAnalyticsRouter);
   app.use('/api/admin/users', requireAuth, requireAdmin, adminUsersRouter);
   app.use('/api/admin/billing', requireAuth, requireAdmin, adminBillingRouter);
   app.use('/api/admin/wallet', requireAuth, requireAdmin, adminWalletRouter);
   app.use('/api/admin/dashboard', requireAuth, requireAdmin, adminDashboardRouter);
   app.use('/api/admin/recharge', requireAuth, requireAdmin, adminRechargeRouter);
   app.use('/api/admin/settings', requireAuth, requireAdmin, adminPlatformSettingsRouter);
+  app.use('/api/admin/codex', requireAuth, requireAdmin, codexOauthRouter);
+  app.use('/api/admin/codex-auth', codexAuthRouter);
 
   // Static, unauthenticated API reference: GET /v1/docs (viewer) and
   // GET /v1/openapi.json (spec). Mounted before the rate limiter so the docs

@@ -6,7 +6,9 @@ export interface ClientContext {
   userAgent: string | null;
   consumerUserId: number | null;
   consumerApiKeyId: number | null;
+  consumerApiKeyType: 'universal' | 'codex_pool' | null;
   walletReservationId: number | null;
+  codexUsageRecordId: number | null;
 }
 
 // Request-scoped caller identity, readable from anywhere below the middleware
@@ -19,7 +21,9 @@ function createContext(ip: string | null, userAgent: string | null): ClientConte
   Object.defineProperties(context, {
     consumerUserId: { value: null, writable: true, enumerable: false },
     consumerApiKeyId: { value: null, writable: true, enumerable: false },
+    consumerApiKeyType: { value: null, writable: true, enumerable: false },
     walletReservationId: { value: null, writable: true, enumerable: false },
+    codexUsageRecordId: { value: null, writable: true, enumerable: false },
   });
   return context;
 }
@@ -55,11 +59,16 @@ export function getClientContext(): ClientContext {
   return storage.getStore() ?? createContext(null, null);
 }
 
-export function setConsumerIdentity(userId: number, keyId: number): void {
+export function setConsumerIdentity(
+  userId: number,
+  keyId: number,
+  keyType: 'universal' | 'codex_pool' = 'universal',
+): void {
   const context = storage.getStore();
   if (context) {
     context.consumerUserId = userId;
     context.consumerApiKeyId = keyId;
+    context.consumerApiKeyType = keyType;
   }
 }
 
@@ -73,4 +82,22 @@ export function setWalletReservationId(
     context.walletReservationId =
       reservationId;
   }
+}
+
+/** Attach the provider-side Codex usage row to the next request log entry. */
+export function setCodexUsageRecordId(recordId: number | null): void {
+  const context = storage.getStore();
+  if (context) context.codexUsageRecordId = recordId;
+}
+
+/**
+ * Consume the current Codex usage row exactly once. A request can fail over
+ * between several Codex accounts; each attempt records and links its own row.
+ */
+export function takeCodexUsageRecordId(): number | null {
+  const context = storage.getStore();
+  if (!context) return null;
+  const recordId = context.codexUsageRecordId;
+  context.codexUsageRecordId = null;
+  return recordId;
 }

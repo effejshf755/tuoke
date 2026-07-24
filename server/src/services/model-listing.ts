@@ -51,12 +51,24 @@ export function getConsumerCallableCanonicalIds(): Set<string> {
      AND b.model_id = m.model_id
      AND b.billing_enabled = 1
     WHERE m.enabled = 1
-      AND EXISTS (
-        SELECT 1
-        FROM api_keys k
-        WHERE k.platform = m.platform
-          AND k.enabled = 1
-          AND (m.key_id IS NULL OR k.id = m.key_id)
+      AND (
+        EXISTS (
+          SELECT 1
+          FROM api_keys k
+          WHERE k.platform = m.platform
+            AND k.enabled = 1
+            AND (m.key_id IS NULL OR k.id = m.key_id)
+        )
+        OR (
+        m.platform = 'openai-codex'
+        AND EXISTS (
+          SELECT 1
+          FROM codex_oauth_accounts c
+          WHERE c.enabled = 1
+            AND c.status IN ('healthy', 'unknown')
+            AND (c.cooldown_until IS NULL OR c.cooldown_until <= datetime('now'))
+        )
+        )
       )
   `).all() as Array<{ modelDbId: number; modelId: string; platform?: string }>;
 
@@ -95,12 +107,23 @@ export function filterModelListingForConsumer(listing: ModelListing): ModelListi
 
 export function buildModelListing(): ModelListing {
   const availableExpr = `
-    (CASE WHEN m.enabled = 1 AND EXISTS (
+    (CASE WHEN m.enabled = 1 AND (
+      EXISTS (
         SELECT 1 FROM api_keys k
         WHERE k.platform = m.platform
           AND k.enabled = 1
           AND (m.key_id IS NULL OR k.id = m.key_id)
-      ) THEN 1 ELSE 0 END)`;
+      )
+      OR (
+        m.platform = 'openai-codex'
+        AND EXISTS (
+          SELECT 1 FROM codex_oauth_accounts c
+          WHERE c.enabled = 1
+            AND c.status IN ('healthy', 'unknown')
+            AND (c.cooldown_until IS NULL OR c.cooldown_until <= datetime('now'))
+        )
+      )
+    ) THEN 1 ELSE 0 END)`;
   const db = getDb();
 
   let allListed: NormalizedModel[];

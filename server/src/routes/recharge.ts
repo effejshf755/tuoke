@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { getDb } from '../db/index.js';
 import { getSetting } from '../db/index.js';
 import { createPagePayment, isAlipayConfigured, settleAlipayOrder, verifyNotify } from '../services/alipay.js';
+import { activateRechargedFreeTier } from '../services/free-model-access.js';
 
 export const userRechargeRouter =
   Router();
@@ -890,6 +891,12 @@ adminRechargeRouter.post(
           `).run(
             balanceAfterMicro,
             order.userId,
+          );
+
+          activateRechargedFreeTier(
+            db,
+            order.userId,
+            order.amountMicro,
           );
 
           db.prepare(`

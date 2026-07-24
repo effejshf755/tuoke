@@ -13,14 +13,20 @@ import { parseBudget } from '../lib/budget.js';
 import { getModelGroups } from '../services/model-groups.js';
 import { getPenaltyInspector } from '../services/penalty-inspector.js';
 import { getActiveProfileId } from '../services/profile-models.js';
+import { requireAdmin } from '../middleware/requireAdmin.js';
 
 export const fallbackRouter = Router();
 
 // ── Bandit routing strategy ─────────────────────────────────────────────────
 // GET  /routing → active strategy, preset weights, and the per-model score
 //                 breakdown (reliability / speed / intelligence + guardrails).
-fallbackRouter.get('/routing', (_req: Request, res: Response) => {
-  res.json(getRoutingScores());
+function routingUserId(req: Request): number | null {
+  const user = (req as Request & { user?: { userId: number; role: string } }).user;
+  return user?.role === 'user' ? user.userId : null;
+}
+
+fallbackRouter.get('/routing', (req: Request, res: Response) => {
+  res.json(getRoutingScores(routingUserId(req)));
 });
 
 fallbackRouter.get('/penalty-inspector', (_req: Request, res: Response) => {
@@ -51,14 +57,14 @@ fallbackRouter.put('/routing', (req: Request, res: Response) => {
   // intended vector immediately. setCustomWeights throws on an all-zero vector.
   if (parsed.data.weights) {
     try {
-      setCustomWeights(parsed.data.weights);
+      setCustomWeights(parsed.data.weights, routingUserId(req));
     } catch (err: any) {
       res.status(400).json({ error: { message: err?.message ?? 'Invalid custom weights' } });
       return;
     }
   }
-  setRoutingStrategy(parsed.data.strategy as RoutingStrategy);
-  res.json({ strategy: getRoutingStrategy(), presets: BANDIT_PRESETS });
+  setRoutingStrategy(parsed.data.strategy as RoutingStrategy, routingUserId(req));
+  res.json({ strategy: getRoutingStrategy(routingUserId(req)), presets: BANDIT_PRESETS });
 });
 
 // Get fallback chain (with dynamic penalties)
@@ -172,7 +178,7 @@ const updateSchema = z.array(z.object({
 }));
 
 // Update fallback chain (full replace)
-fallbackRouter.put('/', (req: Request, res: Response) => {
+fallbackRouter.put('/', requireAdmin, (req: Request, res: Response) => {
   const parsed = updateSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: { message: parsed.error.errors.map(e => e.message).join(', ') } });
@@ -237,7 +243,7 @@ function getBudgetScore(m: { monthly_token_budget: string; tpd_limit: number | n
   return maxNum * mult;
 }
 
-fallbackRouter.post('/sort/:preset', (req: Request, res: Response) => {
+fallbackRouter.post('/sort/:preset', requireAdmin, (req: Request, res: Response) => {
   const preset = String(req.params.preset);
   const db = getDb();
   let models: { id: number }[] = [];

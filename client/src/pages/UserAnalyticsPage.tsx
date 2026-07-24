@@ -1,14 +1,5 @@
-import { useQuery } from '@tanstack/react-query'
-import { apiFetch } from '@/lib/api'
-import { formatBeijingDateTime } from '@/lib/utils'
+import AnalyticsPage from '@/pages/AnalyticsPage'
 
-type Usage = { total_requests: number; prompt_tokens: number; completion_tokens: number; total_tokens: number }
-type Request = { id: number; createdAt: string; requestedModel: string | null; routedModel: string; status: string; totalTokens: number; latencyMs: number | null }
 export default function UserAnalyticsPage() {
-  const usage = useQuery<Usage>({ queryKey: ['user-usage'], queryFn: () => apiFetch('/api/user/usage') })
-  const requests = useQuery<{ requests: Request[] }>({ queryKey: ['user-analytics-requests'], queryFn: () => apiFetch('/api/user/requests?page=1&limit=10') })
-  const total = usage.data?.total_requests ?? 0
-  const success = requests.data?.requests.filter(item => item.status === 'success').length ?? 0
-  const averageLatency = requests.data?.requests.length ? Math.round(requests.data.requests.reduce((sum, item) => sum + (item.latencyMs ?? 0), 0) / requests.data.requests.length) : 0
-  return <div className="max-w-6xl"><h1 className="text-2xl font-semibold">分析</h1><p className="mt-1 text-sm text-muted-foreground">查看你的请求量、Token 使用量和调用情况。</p><div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{[['请求数', total], ['输入 Token', usage.data?.prompt_tokens ?? 0], ['输出 Token', usage.data?.completion_tokens ?? 0], ['总 Token', usage.data?.total_tokens ?? 0]].map(([label, value]) => <div key={String(label)} className="rounded-2xl border bg-card p-5"><div className="text-sm text-muted-foreground">{label}</div><div className="mt-2 text-2xl font-semibold">{Number(value).toLocaleString()}</div></div>)}<div className="rounded-2xl border bg-card p-5"><div className="text-sm text-muted-foreground">最近请求成功率</div><div className="mt-2 text-2xl font-semibold">{requests.data?.requests.length ? Math.round(success / requests.data.requests.length * 100) : 0}%</div></div><div className="rounded-2xl border bg-card p-5"><div className="text-sm text-muted-foreground">平均耗时</div><div className="mt-2 text-2xl font-semibold">{averageLatency} 毫秒</div></div></div><section className="mt-6 rounded-3xl border bg-card p-6"><h2 className="font-medium">最近调用</h2><div className="mt-4 space-y-2">{requests.data?.requests.map(item => <div key={item.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border p-3 text-sm"><span>{formatBeijingDateTime(item.createdAt)}</span><span className="min-w-0 flex-1 truncate">{item.requestedModel ?? item.routedModel}</span><span>{item.totalTokens.toLocaleString()} Token</span><span className={item.status === 'success' ? 'text-green-600' : 'text-destructive'}>{item.status === 'success' ? '成功' : '失败'}</span></div>)}{!requests.isLoading && !requests.data?.requests.length && <p className="py-8 text-center text-sm text-muted-foreground">暂无调用记录。</p>}</div></section></div>
+  return <AnalyticsPage userScope />
 }

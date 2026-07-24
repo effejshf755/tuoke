@@ -24,6 +24,17 @@ import * as playgroundConversations from '../migrations/20260720_000014_playgrou
 import * as openrouterFreeModels from '../migrations/20260722_000016_openrouter_free_models.js';
 import * as openrouterFreeBillingRules from '../migrations/20260722_000017_openrouter_free_billing_rules.js';
 import * as siliconflowTestModels from '../migrations/20260722_000018_siliconflow_test_models.js';
+import * as codexOauthAccounts from '../migrations/20260722_000019_codex_oauth_accounts.js';
+import * as codexModels from '../migrations/20260723_000020_codex_models.js';
+import * as addCodexModel from '../migrations/20260723_000021_add_codex_model.js';
+import * as codexModelAndBilling from '../migrations/20260723_000022_codex_model_and_billing.js';
+import * as consumerApiKeyType from '../migrations/20260723_000023_consumer_api_key_type.js';
+import * as modelUpstreamId from '../migrations/20260723_000024_model_upstream_id.js';
+import * as codexOauthAccountModels from '../migrations/20260723_000025_codex_oauth_account_models.js';
+import * as codexUsageStats from '../migrations/20260723_000026_codex_usage_stats.js';
+import * as codexUsageRecords from '../migrations/20260723_000027_codex_usage_records.js';
+import * as codexAccountQuota from '../migrations/20260723_000028_codex_account_quota.js';
+import * as freeModelAccess from '../migrations/20260723_000029_free_model_access.js';
 
 export interface MigrationModule {
   up(db: Db): void;
@@ -60,6 +71,17 @@ export const PLAYGROUND_CONVERSATIONS_FILENAME = '20260720_000014_playground_con
 export const OPENROUTER_FREE_MODELS_FILENAME = '20260722_000016_openrouter_free_models.ts';
 export const OPENROUTER_FREE_BILLING_RULES_FILENAME = '20260722_000017_openrouter_free_billing_rules.ts';
 export const SILICONFLOW_TEST_MODELS_FILENAME = '20260722_000018_siliconflow_test_models.ts';
+export const CODEX_OAUTH_ACCOUNTS_FILENAME = '20260722_000019_codex_oauth_accounts.ts';
+export const ADD_CODEX_MODEL_FILENAME = '20260723_000021_add_codex_model.ts';
+export const CODEX_MODELS_FILENAME = '20260723_000020_codex_models.ts';
+export const CODEX_MODEL_AND_BILLING_FILENAME = '20260723_000022_codex_model_and_billing.ts';
+export const CONSUMER_API_KEY_TYPE_FILENAME = '20260723_000023_consumer_api_key_type.ts';
+export const MODEL_UPSTREAM_ID_FILENAME = '20260723_000024_model_upstream_id.ts';
+export const CODEX_OAUTH_ACCOUNT_MODELS_FILENAME = '20260723_000025_codex_oauth_account_models.ts';
+export const CODEX_USAGE_STATS_FILENAME = '20260723_000026_codex_usage_stats.ts';
+export const CODEX_USAGE_RECORDS_FILENAME = '20260723_000027_codex_usage_records.ts';
+export const CODEX_ACCOUNT_QUOTA_FILENAME = '20260723_000028_codex_account_quota.ts';
+export const FREE_MODEL_ACCESS_FILENAME = '20260723_000029_free_model_access.ts';
 
 export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: LEGACY_BASELINE_FILENAME, module: legacyBaseline },
@@ -83,8 +105,19 @@ export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: RECHARGE_ORDERS_FILENAME, module: rechargeOrders },
   { filename: PLATFORM_SETTINGS_FILENAME, module: platformSettings },
   { filename: BONUS_WALLET_TRANSACTION_FILENAME, module: bonusWalletTransaction },
-{ filename: PLAYGROUND_CONVERSATIONS_FILENAME, module: playgroundConversations },
+  { filename: PLAYGROUND_CONVERSATIONS_FILENAME, module: playgroundConversations },
   { filename: OPENROUTER_FREE_MODELS_FILENAME, module: openrouterFreeModels },
   { filename: OPENROUTER_FREE_BILLING_RULES_FILENAME, module: openrouterFreeBillingRules },
   { filename: SILICONFLOW_TEST_MODELS_FILENAME, module: siliconflowTestModels },
+  { filename: CODEX_OAUTH_ACCOUNTS_FILENAME, module: codexOauthAccounts },
+  { filename: CODEX_MODELS_FILENAME, module: codexModels },
+  { filename: ADD_CODEX_MODEL_FILENAME, module: addCodexModel },
+  { filename: CODEX_MODEL_AND_BILLING_FILENAME, module: codexModelAndBilling },
+  { filename: CONSUMER_API_KEY_TYPE_FILENAME, module: consumerApiKeyType },
+  { filename: MODEL_UPSTREAM_ID_FILENAME, module: modelUpstreamId },
+  { filename: CODEX_OAUTH_ACCOUNT_MODELS_FILENAME, module: codexOauthAccountModels },
+  { filename: CODEX_USAGE_STATS_FILENAME, module: codexUsageStats },
+  { filename: CODEX_USAGE_RECORDS_FILENAME, module: codexUsageRecords },
+  { filename: CODEX_ACCOUNT_QUOTA_FILENAME, module: codexAccountQuota },
+  { filename: FREE_MODEL_ACCESS_FILENAME, module: freeModelAccess },
 ];

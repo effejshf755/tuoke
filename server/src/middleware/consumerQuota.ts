@@ -19,6 +19,10 @@ import {
 } from '../services/billing-reservation.js';
 
 import {
+  estimateCodexBillingReservation,
+} from '../services/codex-billing.js';
+
+import {
   releaseWalletReservation,
   reserveWalletBalance,
 } from '../services/wallet-reservations.js';
@@ -27,6 +31,12 @@ import {
   setWalletReservationId,
   setConsumerIdentity,
 } from '../lib/client-context.js';
+import {
+  consumeFreeModelRequest,
+  getAvailableBalanceMicro,
+  isExplicitFreeModel,
+  PAID_MODEL_MINIMUM_BALANCE_MICRO,
+} from '../services/free-model-access.js';
 
 const consumerRequestTimes = new Map<number, number[]>();
 
@@ -114,7 +124,51 @@ export function consumerQuota(
   // Establish identity before any downstream route can log the request.
   // Global/admin keys never enter this branch because they do not use the
   // tuoke-* consumer-key namespace.
-  setConsumerIdentity(key.userId, key.id);
+  setConsumerIdentity(key.userId, key.id, key.keyType);
+
+  const requestedModel = typeof req.body?.model === 'string'
+    ? req.body.model.trim()
+    : '';
+  const requestsCodexPool = requestedModel !== '' && (
+    requestedModel === 'codex'
+    || requestedModel === 'openai-codex/codex'
+    || Boolean(db.prepare(`
+      SELECT 1
+      FROM models
+      WHERE platform = 'openai-codex'
+        AND model_id = ?
+      LIMIT 1
+    `).get(requestedModel))
+    || Boolean(db.prepare(`
+      SELECT 1
+      FROM codex_oauth_account_models
+      WHERE model_id = ?
+      LIMIT 1
+    `).get(requestedModel))
+  );
+
+  if (key.keyType !== 'codex_pool' && requestsCodexPool) {
+    res.status(403).json({
+      error: {
+        message: 'This API key does not have access to Codex pool',
+        type: 'permission_error',
+      },
+    });
+    return;
+  }
+
+  if (
+    key.keyType === 'codex_pool'
+    && !requestsCodexPool
+  ) {
+    res.status(403).json({
+      error: {
+        message: 'This API key only has access to Codex pool',
+        type: 'permission_error',
+      },
+    });
+    return;
+  }
   const now = Date.now();
   const recent = (consumerRequestTimes.get(key.id) ?? []).filter((time) => now - time < 60_000);
   const configuredRpm = key.rateLimitRpm ?? Number(getSetting('default_consumer_rpm') ?? 60);
@@ -131,11 +185,9 @@ export function consumerQuota(
    * Calculate the maximum safe authorization amount
    * before calling any upstream model.
    */
-  const estimate =
-    estimateBillingReservation(
-      db,
-      req.body,
-    );
+  const estimate = key.keyType === 'codex_pool'
+    ? estimateCodexBillingReservation(db, req.body)
+    : estimateBillingReservation(db, req.body);
 
   /*
    * Consumer requests must never silently use an
@@ -167,10 +219,49 @@ export function consumerQuota(
    * No wallet reservation is needed.
    * logRequest() will later mark it as free.
    */
-  if (
-    estimate.reserveMicro <= 0
-  ) {
+  const explicitFreeModel =
+    key.keyType === 'universal'
+    && isExplicitFreeModel(db, estimate.requestedModel);
+
+  if (explicitFreeModel) {
+    const freeAccess = consumeFreeModelRequest(db, key.userId);
+    res.setHeader('X-Free-Model-Daily-Limit', String(freeAccess.limit));
+    res.setHeader('X-Free-Model-Daily-Used', String(freeAccess.used));
+
+    if (!freeAccess.allowed) {
+      res.status(429).json({
+        error: {
+          message: freeAccess.limit === 50
+            ? 'Daily free-model limit reached. Recharge at least 10 yuan to unlock 1000 requests per day for 30 days.'
+            : 'Daily free-model limit reached.',
+          type: 'free_model_daily_limit_exceeded',
+          limit: freeAccess.limit,
+          used: freeAccess.used,
+          upgraded_until: freeAccess.upgradedUntil,
+        },
+      });
+      return;
+    }
+
     next();
+    return;
+  }
+
+  if (estimate.reserveMicro <= 0) {
+    next();
+    return;
+  }
+
+  const availableMicro = getAvailableBalanceMicro(db, key.userId);
+  if (availableMicro === null || availableMicro < PAID_MODEL_MINIMUM_BALANCE_MICRO) {
+    res.status(402).json({
+      error: {
+        message: 'Paid models require an available balance of at least 1 yuan.',
+        type: 'minimum_balance_required',
+        minimum_balance_micro: PAID_MODEL_MINIMUM_BALANCE_MICRO,
+        available_micro: availableMicro ?? 0,
+      },
+    });
     return;
   }
 
@@ -186,7 +277,7 @@ export function consumerQuota(
 
       key.userId,
 
-      null,
+      key.keyType === 'codex_pool' ? key.id : null,
 
       estimate.requestedModel,
 

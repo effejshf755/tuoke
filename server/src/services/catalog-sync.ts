@@ -17,6 +17,36 @@ import { ensureAllModelsInProfiles } from './profile-models.js';
 // (see services/media.ts), never into the chat `models` table.
 const MEDIA_MODALITIES = new Set(['image', 'audio']);
 
+// Models owned by this installation rather than by the published catalog.
+// Catalog refreshes must never mutate, disable, tombstone-delete, or prune
+// these rows when they are absent from (or differ from) the remote catalog.
+const INTERNAL_CHAT_MODELS = new Set(['openai-codex:codex']);
+
+function isInternalChatModel(platform: string, modelId: string): boolean {
+  return INTERNAL_CHAT_MODELS.has(`${platform}:${modelId}`);
+}
+
+function ensureInternalChatModels(db: Db): void {
+  db.prepare(`
+    INSERT OR IGNORE INTO models (
+      platform, model_id, display_name, intelligence_rank, speed_rank,
+      size_label, monthly_token_budget, enabled, supports_vision, supports_tools
+    ) VALUES ('openai-codex', 'codex', 'OpenAI Codex', 1, 1, '', '', 1, 0, 0)
+  `).run();
+
+  const row = db.prepare(`
+    SELECT id FROM models
+     WHERE platform = 'openai-codex' AND model_id = 'codex'
+  `).get() as { id: number };
+  const priority = (db.prepare(`
+    SELECT COALESCE(MAX(priority), 0) + 1 AS value FROM fallback_config
+  `).get() as { value: number }).value;
+  db.prepare(`
+    INSERT OR IGNORE INTO fallback_config (model_db_id, priority, enabled)
+    VALUES (?, ?, 1)
+  `).run(row.id, priority);
+}
+
 /**
  * catalog-sync — keeps the local model catalog in step with the published one.
  *
@@ -202,7 +232,10 @@ export function applyCatalog(db: Db, catalog: Catalog): NonNullable<SyncResult['
   `);
 
   const apply = db.transaction(() => {
-    const inCatalog = new Set<string>();
+    ensureInternalChatModels(db);
+    // Treat internal models as permanently present without making them catalog
+    // managed. This protects them from the vanished-model pruning pass.
+    const inCatalog = new Set<string>(INTERNAL_CHAT_MODELS);
     const inMediaCatalog = new Set<string>();
 
     for (const m of catalog.models) {
@@ -233,6 +266,11 @@ export function applyCatalog(db: Db, catalog: Catalog): NonNullable<SyncResult['
         }
         continue;
       }
+
+      // Internal providers own their model metadata and state. Even if a
+      // future catalog happens to include this ID, it may not disable or
+      // overwrite the local row.
+      if (isInternalChatModel(m.platform, m.modelId)) continue;
 
       if (m.platform === 'custom' || !hasProvider(m.platform as Platform)) {
         // An older binary may receive models for providers it cannot route yet;
@@ -271,6 +309,17 @@ export function applyCatalog(db: Db, catalog: Catalog): NonNullable<SyncResult['
       }
     }
 
+    // An internal model cannot be deleted by a stale/admin-created catalog
+    // tombstone. Other catalog tombstones retain their existing behaviour.
+    for (const key of INTERNAL_CHAT_MODELS) {
+      const separator = key.indexOf(':');
+      const platform = key.slice(0, separator);
+      const modelId = key.slice(separator + 1);
+      db.prepare(`
+        DELETE FROM catalog_model_tombstones
+         WHERE kind = 'chat' AND platform = ? AND model_id = ?
+      `).run(platform, modelId);
+    }
     counts.removed += deleteTombstonedCatalogModels(db);
     applyAllModelOverrides(db);
 
@@ -300,6 +349,7 @@ export function applyCatalog(db: Db, catalog: Catalog): NonNullable<SyncResult['
     const deleteFb = db.prepare('DELETE FROM fallback_config WHERE model_db_id = ?');
     const deleteModel = db.prepare('DELETE FROM models WHERE id = ?');
     for (const c of candidates) {
+      if (isInternalChatModel(c.platform, c.model_id)) continue;
       if (!hasProvider(c.platform as Platform)) continue; // not catalog-managed by this binary
       if (!inCatalog.has(`${c.platform}:${c.model_id}`)) {
         deleteFb.run(c.id);
@@ -512,6 +562,9 @@ export function startCatalogSync(scheduler: Scheduler): void {
     console.log('[catalog-sync] disabled via CATALOG_SYNC_DISABLED=1');
     return;
   }
+  // Migrations are recorded only once. If an older catalog-sync previously
+  // pruned this row, a restart must restore it before any cached/network sync.
+  ensureInternalChatModels(getDb());
   reapplyCachedCatalog();
   const run = () => {
     void refreshLicenseStatus();

@@ -43,6 +43,7 @@ import UserCenterPage from '@/pages/UserCenterPage'
 import MyPage from '@/pages/MyPage'
 import UserModelsPage from '@/pages/UserModelsPage'
 import UserAnalyticsPage from '@/pages/UserAnalyticsPage'
+import UserCodexAccountsPage from '@/pages/UserCodexAccountsPage'
 import ApiDocsPage from '@/pages/ApiDocsPage'
 import AdminUsersPage from '@/pages/AdminUsersPage'
 import AdminBillingPage from '@/pages/AdminBillingPage'
@@ -50,6 +51,8 @@ import AdminModelsPage from '@/pages/AdminModelsPage'
 import AdminRechargePage from '@/pages/AdminRechargePage'
 import AdminDashboardPage from '@/pages/AdminDashboardPage'
 import AdminSettingsPage from '@/pages/AdminSettingsPage'
+import AdminCodexAccountsPage from '@/pages/AdminCodexAccountsPage'
+import AdminCodexStatsPage from '@/pages/AdminCodexStatsPage'
 import PublicHomePage from '@/pages/PublicHomePage'
 
 // Every failed mutation surfaces as an error toast, so no action fails
@@ -76,6 +79,7 @@ const navItems = [
   { to: '/admin/billing', labelKey: 'nav.billing' },
   { to: '/admin/recharge', labelKey: 'nav.recharge' },
   { to: '/admin/settings', labelKey: 'nav.settings' },
+  { to: '/admin/codex/accounts', labelKey: 'Codex 账号池' },
 ]
 
 // The five modality pages behind "Models"; surfaced in the nav dropdown and
@@ -96,10 +100,10 @@ function NavItem({ to, children }: { to: string; children: React.ReactNode }) {
     <NavLink
       to={to}
       className={({ isActive }) =>
-        `relative text-sm px-1 py-4 transition-colors ${
+        `relative flex h-9 items-center rounded-xl border px-3 text-sm transition-[color,background-color,border-color,box-shadow,transform] duration-200 active:scale-[0.97] ${
           isActive
-            ? 'text-foreground after:absolute after:inset-x-0 after:-bottom-px after:h-px after:bg-foreground'
-            : 'text-muted-foreground hover:text-foreground'
+            ? 'border-white/15 bg-white/[0.12] text-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.16),0_8px_24px_rgba(0,0,0,0.18)]'
+            : 'border-transparent text-muted-foreground hover:border-white/10 hover:bg-white/[0.07] hover:text-foreground active:bg-white/[0.12]'
         }`
       }
     >
@@ -156,7 +160,7 @@ function Navbar() {
   const isPublicHome = location.pathname === '/'
   const navigate = useNavigate()
   const { data: authStatus } = useQuery<{ role: 'admin' | 'user' | null }>({ queryKey: ['auth-status'] })
-  const visibleNavItems = authStatus?.role === 'admin' ? navItems : authStatus?.role === 'user' ? [{ to: '/user-center', labelKey: 'nav.console' }, { to: '/playground', labelKey: 'nav.playground' }, { to: '/user-models', labelKey: 'nav.models' }, { to: '/analytics', labelKey: 'nav.analytics' }, { to: '/my', labelKey: 'nav.me' }] : [{ to: '/', labelKey: 'nav.home' }, { to: '/user-models', labelKey: 'nav.models' }]
+  const visibleNavItems = authStatus?.role === 'admin' ? navItems : authStatus?.role === 'user' ? [{ to: '/models', labelKey: 'nav.models' }, { to: '/codex', labelKey: 'Codex' }, { to: '/playground', labelKey: 'nav.playground' }, { to: '/user-center', labelKey: 'nav.console' }, { to: '/analytics', labelKey: 'nav.analytics' }, { to: '/my', labelKey: 'nav.me' }] : [{ to: '/', labelKey: 'nav.home' }, { to: '/user-models', labelKey: 'nav.models' }]
 
   function isActiveRoute(to: string) {
     return location.pathname === to
@@ -166,28 +170,28 @@ function Navbar() {
     <header
       // In the desktop shell the body backdrop is already translucent glass;
       // a lighter wash keeps the title bar from looking more solid than the page.
-      className={`${isPublicHome ? 'fixed inset-x-0' : 'sticky'} top-0 z-40 border-transparent bg-transparent shadow-none backdrop-blur-none`}
+      className={`${isPublicHome ? 'fixed inset-x-0' : 'sticky'} top-0 z-40 px-3 py-3 sm:px-5`}
       style={isDesktopApp ? ({ WebkitAppRegion: 'drag' } as React.CSSProperties) : undefined}
     >
       <div
-        className={`mx-auto flex max-w-6xl items-center px-4 sm:px-6 ${isDesktopApp ? 'pl-20 sm:pl-20' : ''}`}
+        className={`mx-auto flex min-h-14 max-w-6xl items-center rounded-2xl border border-white/10 bg-background/55 px-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.10),0_12px_36px_rgba(0,0,0,0.24)] backdrop-blur-2xl supports-[backdrop-filter]:bg-background/45 sm:px-4 ${isDesktopApp ? 'pl-20 sm:pl-20' : ''}`}
         style={isDesktopApp ? { minHeight: 52 } : undefined}
       >
-          <Link to="/" className="flex items-center gap-2 transition-opacity hover:opacity-70"><span className="inline-block size-2 rounded-full bg-foreground" /><span className="font-semibold tracking-tight text-sm">Tuoke API</span></Link>
+          <Link to="/" className="flex h-9 shrink-0 items-center gap-2 rounded-xl border border-transparent px-2 transition-[background-color,border-color,transform] hover:border-white/10 hover:bg-white/[0.07] active:scale-[0.97]"><span className="inline-block size-2 rounded-full bg-foreground shadow-[0_0_12px_rgba(255,255,255,0.7)]" /><span className="text-sm font-semibold tracking-tight">Tuoke API</span></Link>
         <nav
-          className="ml-10 hidden items-center gap-6 xl:flex"
+          className="ml-6 hidden items-center gap-1 xl:flex"
           style={isDesktopApp ? ({ WebkitAppRegion: 'no-drag' } as React.CSSProperties) : undefined}
         >
           {visibleNavItems.map((item) =>
             item.to === '/models' ? (
               // Split control: the label navigates, the chevron reveals the
               // five modality pages hiding behind "Models".
-              <div key={item.to} className="flex items-center gap-0.5">
+              <div key={item.to} className="flex items-center gap-0.5 rounded-xl">
                 <NavItem to={item.to}>{t(item.labelKey)}</NavItem>
                 <DropdownMenu>
                   <DropdownMenuTrigger
                     aria-label={t('nav.modelsMenu')}
-                    className="rounded-md p-1 text-muted-foreground transition-colors hover:text-foreground"
+                    className="flex size-8 items-center justify-center rounded-xl border border-transparent text-muted-foreground transition-[color,background-color,border-color,transform,box-shadow] hover:border-white/10 hover:bg-white/[0.07] hover:text-foreground active:scale-95 active:bg-white/[0.12]"
                   >
                     <ChevronDown className="size-3.5" />
                   </DropdownMenuTrigger>
@@ -215,14 +219,14 @@ function Navbar() {
             type="button"
             onClick={openCommandPalette}
             aria-label={t('palette.title')}
-            className={buttonVariants({ variant: 'ghost', size: 'sm' })}
+            className={`${buttonVariants({ variant: 'ghost', size: 'sm' })} rounded-xl border border-white/10 bg-white/[0.05] shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] transition-[background-color,transform,box-shadow] hover:bg-white/[0.10] active:scale-[0.97]`}
           >
             <Search className="size-3.5" />
             <kbd className="text-[10px] text-muted-foreground">{isMac ? '⌘K' : 'Ctrl K'}</kbd>
           </button>
           <DropdownMenu>
             <DropdownMenuTrigger
-              className={buttonVariants({ variant: 'ghost', size: 'icon' })}
+              className={`${buttonVariants({ variant: 'ghost', size: 'icon' })} rounded-xl border border-white/10 bg-white/[0.05] shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] transition-[background-color,transform] hover:bg-white/[0.10] active:scale-95`}
               aria-label={t('nav.openMenu')}
             >
               <MoreHorizontal />
@@ -244,7 +248,7 @@ function Navbar() {
         <div className="ml-auto xl:hidden">
           <DropdownMenu>
             <DropdownMenuTrigger
-              className={buttonVariants({ variant: 'ghost', size: 'icon' })}
+              className={`${buttonVariants({ variant: 'ghost', size: 'icon' })} rounded-xl border border-white/10 bg-white/[0.07] shadow-[inset_0_1px_0_rgba(255,255,255,0.10)] transition-[background-color,transform] hover:bg-white/[0.12] active:scale-95`}
               aria-label={t('nav.openMenu')}
             >
               <Menu />
@@ -302,8 +306,12 @@ function KeysRoute() {
 }
 
 function ModelsRoute() {
+  return <Navigate to="/models/chat" replace />
+}
+
+function ModelDetailRoute() {
   const { data } = useQuery<{ role: 'admin' | 'user' | null }>({ queryKey: ['auth-status'] })
-  return data?.role === 'user' ? <UserModelsPage /> : <Navigate to="/models/chat" replace />
+  return data?.role === 'admin' ? <ModelDetailPage /> : <Navigate to="/models/chat" replace />
 }
 
 function AnalyticsRoute() {
@@ -363,7 +371,7 @@ function App() {
                 <Route path="/login" element={<Navigate to="/" replace />} />
                 <Route path="/models" element={<ModelsRoute />} />
                 <Route path="/models/chat" element={<FallbackPage />} />
-                <Route path="/models/chat/:id" element={<ModelDetailPage />} />
+                <Route path="/models/chat/:id" element={<ModelDetailRoute />} />
                 <Route path="/models/fusion" element={<FusionPage />} />
                 <Route path="/models/embeddings" element={<EmbeddingsPage />} />
                 <Route path="/models/embeddings/:id" element={<EmbeddingDetailPage />} />
@@ -378,6 +386,7 @@ function App() {
                 <Route path="/premium" element={<PremiumPage />} />
                 <Route path="/user-center" element={<UserCenterPage />} />
                 <Route path="/my" element={<MyPage />} />
+                <Route path="/codex" element={<UserCodexAccountsPage />} />
                 <Route path="/account-settings" element={<AccountSettingsPage />} />
                 <Route path="/user-models" element={<UserModelsPage />} />
                 <Route path="/api-docs" element={<ApiDocsPage />} />
@@ -387,6 +396,9 @@ function App() {
                 <Route path="/admin/billing" element={<AdminBillingPage />} />
                 <Route path="/admin/recharge" element={<AdminRechargePage />} />
                 <Route path="/admin/settings" element={<AdminSettingsPage />} />
+                <Route path="/admin/codex" element={<Navigate to="/admin/codex/accounts" replace />} />
+                <Route path="/admin/codex/accounts" element={<AdminCodexAccountsPage />} />
+                <Route path="/admin/codex/monitor" element={<AdminCodexStatsPage />} />
                 <Route path="/test" element={<Navigate to="/playground" replace />} />
                 <Route path="/health" element={<Navigate to="/keys" replace />} />
                 <Route path="*" element={<NotFoundPage />} />

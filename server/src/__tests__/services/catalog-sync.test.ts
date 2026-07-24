@@ -164,6 +164,63 @@ describe('applyCatalog', () => {
     expect(row.enabled).toBe(1);
   });
 
+  it('preserves the internal openai-codex model across catalog refreshes', () => {
+    getDb()
+      .prepare(`
+        INSERT OR IGNORE INTO models (
+          platform, model_id, display_name, intelligence_rank,
+          speed_rank, size_label, enabled, supports_vision, supports_tools
+        ) VALUES (
+          'openai-codex', 'codex', 'OpenAI Codex', 1, 1, '', 1, 0, 0
+        )
+      `)
+      .run();
+    getDb().prepare(`
+      UPDATE models
+         SET display_name = 'OpenAI Codex', enabled = 1
+       WHERE platform = 'openai-codex' AND model_id = 'codex'
+    `).run();
+    recordCatalogModelTombstone(getDb(), 'chat', 'openai-codex', 'codex');
+
+    const catalogModels = existingAsCatalogModels()
+      .filter((m) => !(m.platform === 'openai-codex' && m.modelId === 'codex'));
+    catalogModels.push(baseModel({
+      platform: 'openai-codex',
+      modelId: 'codex',
+      displayName: 'Remote overwrite attempt',
+      enabled: false,
+    }));
+
+    applyCatalog(getDb(), catalogOf(catalogModels));
+
+    const row = getDb().prepare(`
+      SELECT display_name, enabled
+        FROM models
+       WHERE platform = 'openai-codex' AND model_id = 'codex'
+    `).get() as { display_name: string; enabled: number };
+    expect(row).toEqual({ display_name: 'OpenAI Codex', enabled: 1 });
+    expect(getDb().prepare(`
+      SELECT 1 FROM catalog_model_tombstones
+       WHERE kind = 'chat' AND platform = 'openai-codex' AND model_id = 'codex'
+    `).get()).toBeUndefined();
+
+    getDb().prepare(`
+      DELETE FROM fallback_config
+       WHERE model_db_id = (SELECT id FROM models WHERE platform = 'openai-codex' AND model_id = 'codex')
+    `).run();
+    getDb().prepare("DELETE FROM models WHERE platform = 'openai-codex' AND model_id = 'codex'").run();
+    applyCatalog(getDb(), catalogOf(existingAsCatalogModels()));
+
+    const restored = getDb().prepare(`
+      SELECT m.enabled, f.id AS fallback_id
+        FROM models m
+        JOIN fallback_config f ON f.model_db_id = m.id
+       WHERE m.platform = 'openai-codex' AND m.model_id = 'codex'
+    `).get() as { enabled: number; fallback_id: number };
+    expect(restored.enabled).toBe(1);
+    expect(restored.fallback_id).toBeTypeOf('number');
+  });
+
   it('re-applies local model overrides after catalog metadata refreshes', () => {
     const models = existingAsCatalogModels().filter((m) => m.modelId !== 'override-model');
     models.push(baseModel({

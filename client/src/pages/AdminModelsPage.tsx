@@ -118,7 +118,7 @@ function NumberField({ label, value, onChange }: { label: string; value: string;
 export default function AdminModelsPage() {
   const queryClient = useQueryClient()
   const [search, setSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState<'all' | 'enabled' | 'visible' | 'billing'>('all')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'enabled' | 'visible' | 'health-success'>('all')
   const [sortBy, setSortBy] = useState<'default' | 'available' | 'health' | 'name' | 'platform'>(() => {
     const saved = window.localStorage.getItem('admin-models-sort')
     return saved === 'available' || saved === 'health' || saved === 'name' || saved === 'platform' ? saved : 'default'
@@ -129,6 +129,7 @@ export default function AdminModelsPage() {
   const [error, setError] = useState('')
   const [discoverOpen, setDiscoverOpen] = useState(false)
   const [selectedCandidates, setSelectedCandidates] = useState<string[]>([])
+  const [selectedModelIds, setSelectedModelIds] = useState<number[]>([])
 
   useEffect(() => {
     window.localStorage.setItem('admin-models-sort', sortBy)
@@ -190,6 +191,21 @@ export default function AdminModelsPage() {
     onError: (mutationError) => setError(mutationError.message),
   })
 
+  const bulkUpdate = useMutation<void, Error, { action: 'visible' | 'hidden' | 'start' | 'stop' }>({
+    mutationFn: async ({ action }) => {
+      const selected = models.filter((model) => selectedModelIds.includes(model.id))
+      await Promise.all(selected.map(async (model) => {
+        if (action === 'start' || action === 'stop') {
+          await apiFetch(`/api/models/${model.id}`, { method: 'PATCH', body: JSON.stringify({ enabled: action === 'start', fallbackEnabled: model.fallbackEnabled }) })
+        } else {
+          await apiFetch(`/api/admin/billing/models/${model.id}`, { method: 'PUT', body: JSON.stringify({ input_price_per_million: model.inputPrice, output_price_per_million: model.outputPrice, multiplier: model.multiplier, billing_enabled: action === 'visible' }) })
+        }
+      }))
+    },
+    onSuccess: async () => { setMessage(`批量操作完成：${selectedModelIds.length} 个模型`); setError(''); setSelectedModelIds([]); await queryClient.invalidateQueries({ queryKey: ['admin-models-base'] }); await queryClient.invalidateQueries({ queryKey: ['admin-models-billing'] }) },
+    onError: (mutationError) => { setMessage(''); setError(mutationError.message) },
+  })
+
   const models = useMemo(() => {
     const baseById = new Map((modelsQuery.data ?? []).map((model) => [model.id, model]))
 
@@ -224,7 +240,7 @@ export default function AdminModelsPage() {
     const filtered = models.filter((model) => {
       if (statusFilter === 'enabled' && !model.enabled) return false
       if (statusFilter === 'visible' && !model.userVisible) return false
-      if (statusFilter === 'billing' && !model.billingEnabled) return false
+      if (statusFilter === 'health-success' && model.health?.status !== 'success') return false
       if (!q) return true
       const searchable = [
         model.platform,
@@ -251,7 +267,7 @@ export default function AdminModelsPage() {
 
   const enabledCount = models.filter((model) => model.enabled).length
   const visibleCount = models.filter((model) => model.userVisible).length
-  const billingCount = models.filter((model) => model.billingEnabled).length
+  const healthSuccessCount = models.filter((model) => model.health?.status === 'success').length
   const loading = modelsQuery.isLoading || billingQuery.isLoading
 
   function draftFor(model: UnifiedModel): Draft {
@@ -332,7 +348,7 @@ export default function AdminModelsPage() {
           </Button>
           <button type="button" aria-pressed={statusFilter === 'enabled'} onClick={() => setStatusFilter(statusFilter === 'enabled' ? 'all' : 'enabled')} className={`rounded-full border px-3 py-1 text-xs transition-colors hover:bg-accent ${statusFilter === 'enabled' ? 'border-primary bg-primary text-primary-foreground' : 'border-border'}`}>启用 {enabledCount}</button>
           <button type="button" aria-pressed={statusFilter === 'visible'} onClick={() => setStatusFilter(statusFilter === 'visible' ? 'all' : 'visible')} className={`rounded-full border px-3 py-1 text-xs transition-colors hover:bg-accent ${statusFilter === 'visible' ? 'border-primary bg-primary text-primary-foreground' : 'border-border'}`}>用户可见 {visibleCount}</button>
-          <button type="button" aria-pressed={statusFilter === 'billing'} onClick={() => setStatusFilter(statusFilter === 'billing' ? 'all' : 'billing')} className={`rounded-full border px-3 py-1 text-xs transition-colors hover:bg-accent ${statusFilter === 'billing' ? 'border-primary bg-primary text-primary-foreground' : 'border-border'}`}>计费开启 {billingCount}</button>
+          <button type="button" aria-pressed={statusFilter === 'health-success'} onClick={() => setStatusFilter(statusFilter === 'health-success' ? 'all' : 'health-success')} className={`rounded-full border px-3 py-1 text-xs transition-colors hover:bg-accent ${statusFilter === 'health-success' ? 'border-primary bg-primary text-primary-foreground' : 'border-border'}`}>检测成功 {healthSuccessCount}</button>
         </div>
       </div>
 
@@ -394,6 +410,10 @@ export default function AdminModelsPage() {
               <option value="name">名称排序</option>
               <option value="platform">平台排序</option>
             </select>
+            <Button size="sm" variant="outline" onClick={() => setSelectedModelIds(selectedModelIds.length === rows.length ? [] : rows.map((model) => model.id))} disabled={rows.length === 0 || bulkUpdate.isPending}>
+              {selectedModelIds.length === rows.length ? '取消全选' : '一键全选'}
+            </Button>
+            {selectedModelIds.length > 0 && <div className="flex flex-wrap items-center gap-2"><span className="text-xs text-muted-foreground">已选 {selectedModelIds.length}</span><Button size="sm" onClick={() => bulkUpdate.mutate({ action: 'visible' })} disabled={bulkUpdate.isPending}>用户可见</Button><Button size="sm" variant="outline" onClick={() => bulkUpdate.mutate({ action: 'hidden' })} disabled={bulkUpdate.isPending}>用户不可见</Button><Button size="sm" variant="outline" onClick={() => bulkUpdate.mutate({ action: 'start' })} disabled={bulkUpdate.isPending}>启动</Button><Button size="sm" variant="outline" onClick={() => bulkUpdate.mutate({ action: 'stop' })} disabled={bulkUpdate.isPending}>停止</Button></div>}
           </div>
           <div className="text-sm text-muted-foreground">共 {rows.length} 个模型</div>
         </div>
@@ -412,6 +432,7 @@ export default function AdminModelsPage() {
               <article key={model.id} className={`relative h-fit min-h-[150px] self-start rounded-2xl border bg-card/90 p-5 shadow-sm backdrop-blur-md transition-shadow hover:shadow-md ${expanded ? 'z-40' : 'z-0'}`}>
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex flex-wrap items-center gap-2">
+                    <input type="checkbox" aria-label={`选择 ${model.displayName}`} checked={selectedModelIds.includes(model.id)} onChange={(event) => setSelectedModelIds((current) => event.target.checked ? [...current, model.id] : current.filter((id) => id !== model.id))} className="size-4 accent-primary" />
                     <Badge variant="secondary">{model.platform}</Badge>
                     <Badge variant={visible ? 'default' : 'outline'}>{visible ? '用户可见' : '不可见'}</Badge>
                   </div>

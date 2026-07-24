@@ -50,6 +50,28 @@ describe('Responses → chat translation (#96)', () => {
     expect(msgs[0]).toEqual({ role: 'tool', tool_call_id: 'call_1', content: 'sunny' });
   });
 
+  it('accepts compact string arrays and ignores unsupported history items', () => {
+    const msgs = toChatMessages({
+      input: [
+        { type: 'reasoning', id: 'rs_1', summary: [] },
+        { type: 'item_reference', id: 'item_1' },
+        'first compact turn',
+        { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'hello' }] },
+      ],
+    } as any);
+    expect(msgs).toEqual([
+      { role: 'user', content: 'first compact turn' },
+      { role: 'user', content: 'hello' },
+    ]);
+  });
+
+  it('accepts string content parts used by compatible Responses clients', () => {
+    const msgs = toChatMessages({
+      input: [{ role: 'user', content: ['hello', { type: 'input_text', text: ' world' }] }],
+    } as any);
+    expect(msgs).toEqual([{ role: 'user', content: 'hello world' }]);
+  });
+
   it('converts flat Responses tools to nested chat tools', () => {
     const tools = toChatTools([
       { type: 'function', name: 'f', description: 'd', parameters: { type: 'object' }, strict: true },

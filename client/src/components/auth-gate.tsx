@@ -20,6 +20,29 @@ import Waves from '@/components/Waves'
 
 const PASSWORD_MIN = 8
 
+function localizeAuthError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error ?? '')
+  const normalized = message.trim().toLowerCase()
+
+  const messages: Array<[string, string]> = [
+    ['failed to send verification code', '验证码发送失败，请检查邮箱配置后重试。'],
+    ['invalid or expired verification code', '验证码错误或已过期，请重新获取。'],
+    ['verification code must be 6 digits', '请输入 6 位邮箱验证码。'],
+    ['please enter the verification code', '请输入邮箱验证码。'],
+    ['invalid email or password', '邮箱或密码错误。'],
+    ['invalid credentials', '邮箱或密码错误。'],
+    ['email already registered', '该邮箱已注册，请直接登录。'],
+    ['registration is disabled', '当前暂未开放注册。'],
+    ['too many requests', '操作过于频繁，请稍后再试。'],
+    ['network error', '网络连接失败，请稍后重试。'],
+    ['failed to fetch', '无法连接服务器，请稍后重试。'],
+  ]
+
+  return messages.find(([key]) => normalized.includes(key))?.[1]
+    ?? message
+    ?? '操作失败，请稍后重试。'
+}
+
 export interface AuthStatus {
   needsSetup: boolean
   authenticated: boolean
@@ -124,9 +147,9 @@ function AuthForm({
 
   const verificationCodeError = isRegister
     ? !verificationCode.trim()
-      ? 'Please enter the verification code'
+      ? '请输入邮箱验证码。'
       : !/^\d{6}$/.test(verificationCode.trim())
-        ? 'Verification code must be 6 digits'
+        ? '请输入 6 位邮箱验证码。'
         : null
     : null
 
@@ -165,9 +188,9 @@ function AuthForm({
       )
 
       setCountdown(60)
-      setCodeMessage('Verification code sent. Check your email.')
+      setCodeMessage('验证码已发送，请检查邮箱。')
     } catch (err) {
-      setError((err as Error).message)
+      setError(localizeAuthError(err))
     } finally {
       setSendingCode(false)
     }
@@ -239,7 +262,7 @@ function AuthForm({
         setCodeRequired(true)
       }
 
-      setError((err as Error).message)
+      setError(localizeAuthError(err))
     } finally {
       setBusy(false)
     }
