@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { initDb, getDb, setSetting, getSetting } from '../../db/index.js';
 import { applyCatalog, reapplyCachedCatalog, MIN_CATALOG_VERSION } from '../../services/catalog-sync.js';
 import { runMigrationsSync } from '../../db/migrate/runner.js';
+import { up as runLegacyBaseline } from '../../db/migrations/20260101_000000_legacy_baseline.js';
 import { recordCatalogModelTombstone, upsertModelOverrides } from '../../services/model-state.js';
 
 // applyCatalog is the write path between the published catalog and the live
@@ -328,9 +329,9 @@ describe('reapplyCachedCatalog', () => {
       getDb().prepare('SELECT id FROM models WHERE platform = ? AND model_id = ?').get(victim.platform, victim.modelId),
     ).toBeUndefined();
 
-    // Simulate a restart: migrations re-insert the baseline model.
-    getDb().exec('DROP TABLE migrations');
-    runMigrationsSync(getDb(), 'up');
+    // Simulate a restart: the re-runnable legacy baseline re-inserts its
+    // bundled catalog rows before the cached catalog is applied.
+    runLegacyBaseline(getDb());
     expect(
       getDb().prepare('SELECT id FROM models WHERE platform = ? AND model_id = ?').get(victim.platform, victim.modelId),
     ).toBeDefined();

@@ -54,6 +54,11 @@ import AdminSettingsPage from '@/pages/AdminSettingsPage'
 import AdminCodexAccountsPage from '@/pages/AdminCodexAccountsPage'
 import AdminCodexStatsPage from '@/pages/AdminCodexStatsPage'
 import PublicHomePage from '@/pages/PublicHomePage'
+import { ResourceOrdersPage, ResourceProductDetailPage, ResourceProductsPage, ResourceSubscriptionsPage, ResourceUsagePage } from '@/pages/ResourcePages'
+import { AdminResourceAuditPage, AdminResourcesPage, AdminResourceSubpoolsPage } from '@/pages/AdminResourcePages'
+import { AdminResourceProductsPage } from '@/pages/AdminResourceProductsPage'
+import { AdminResourceOrdersPage } from '@/pages/AdminResourceOrdersPage'
+import { AdminResourceSubpoolDetailPage } from '@/pages/AdminResourceSubpoolDetailPage'
 
 // Every failed mutation surfaces as an error toast, so no action fails
 // silently. A page that already shows the failure inline can opt out with
@@ -80,6 +85,7 @@ const navItems = [
   { to: '/admin/recharge', labelKey: 'nav.recharge' },
   { to: '/admin/settings', labelKey: 'nav.settings' },
   { to: '/admin/codex/accounts', labelKey: 'Codex 账号池' },
+  { to: '/admin/resources', labelKey: '资源运营' },
 ]
 
 // The five modality pages behind "Models"; surfaced in the nav dropdown and
@@ -160,7 +166,7 @@ function Navbar() {
   const isPublicHome = location.pathname === '/'
   const navigate = useNavigate()
   const { data: authStatus } = useQuery<{ role: 'admin' | 'user' | null }>({ queryKey: ['auth-status'] })
-  const visibleNavItems = authStatus?.role === 'admin' ? navItems : authStatus?.role === 'user' ? [{ to: '/models', labelKey: 'nav.models' }, { to: '/codex', labelKey: 'Codex' }, { to: '/playground', labelKey: 'nav.playground' }, { to: '/user-center', labelKey: 'nav.console' }, { to: '/analytics', labelKey: 'nav.analytics' }, { to: '/my', labelKey: 'nav.me' }] : [{ to: '/', labelKey: 'nav.home' }, { to: '/user-models', labelKey: 'nav.models' }]
+  const visibleNavItems = authStatus?.role === 'admin' ? navItems : authStatus?.role === 'user' ? [{ to: '/models', labelKey: 'nav.models' }, { to: '/codex', labelKey: 'Codex' }, { to: '/resources/products', labelKey: 'Codex 拼单' }, { to: '/playground', labelKey: 'nav.playground' }, { to: '/user-center', labelKey: 'nav.console' }, { to: '/analytics', labelKey: 'nav.analytics' }, { to: '/my', labelKey: 'nav.me' }] : [{ to: '/', labelKey: 'nav.home' }, { to: '/user-models', labelKey: 'nav.models' }]
 
   function isActiveRoute(to: string) {
     return location.pathname === to
@@ -387,6 +393,11 @@ function App() {
                 <Route path="/user-center" element={<UserCenterPage />} />
                 <Route path="/my" element={<MyPage />} />
                 <Route path="/codex" element={<UserCodexAccountsPage />} />
+                <Route path="/resources/products" element={<ResourceProductsPage />} />
+                <Route path="/resources/products/:id" element={<ResourceProductDetailPage />} />
+                <Route path="/resources/orders" element={<ResourceOrdersPage />} />
+                <Route path="/resources/subscriptions" element={<ResourceSubscriptionsPage />} />
+                <Route path="/resources/usage" element={<ResourceUsagePage />} />
                 <Route path="/account-settings" element={<AccountSettingsPage />} />
                 <Route path="/user-models" element={<UserModelsPage />} />
                 <Route path="/api-docs" element={<ApiDocsPage />} />
@@ -399,6 +410,12 @@ function App() {
                 <Route path="/admin/codex" element={<Navigate to="/admin/codex/accounts" replace />} />
                 <Route path="/admin/codex/accounts" element={<AdminCodexAccountsPage />} />
                 <Route path="/admin/codex/monitor" element={<AdminCodexStatsPage />} />
+                <Route path="/admin/resources" element={<AdminResourcesPage />} />
+                <Route path="/admin/resources/products" element={<AdminResourceProductsPage />} />
+                <Route path="/admin/resources/orders" element={<AdminResourceOrdersPage />} />
+                <Route path="/admin/resources/subpools" element={<AdminResourceSubpoolsPage />} />
+                <Route path="/admin/resources/subpools/:id" element={<AdminResourceSubpoolDetailPage />} />
+                <Route path="/admin/resources/audit" element={<AdminResourceAuditPage />} />
                 <Route path="/test" element={<Navigate to="/playground" replace />} />
                 <Route path="/health" element={<Navigate to="/keys" replace />} />
                 <Route path="*" element={<NotFoundPage />} />

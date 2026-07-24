@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, type RequestHandler } from 'express';
 import { getDb } from '../db/index.js';
 import { z } from 'zod';
 
@@ -8,6 +8,7 @@ import {
   setCodexAccountEnabled,
   createCodexAccount,
   checkCodexAccountHealth,
+  setCodexAccountScope,
 } from '../services/codex-oauth.js';
 
 import { importCodexAuthPayload, importLocalCodexAuth } from '../services/codex-import.js';
@@ -16,7 +17,10 @@ import { getCodexUsageStats } from '../services/codex-usage.js';
 
 export const codexOauthRouter = Router();
 
-const updateAccountSchema = z.object({ enabled: z.boolean() }).strict();
+const updateAccountSchema = z.object({
+  enabled: z.boolean().optional(),
+  resource_scope: z.enum(['codex_pool', 'resource_subpool']).optional(),
+}).strict().refine(value => value.enabled !== undefined || value.resource_scope !== undefined);
 
 const updateCodexBillingSchema = z.object({
   model_id: z.string().trim().min(1).max(200),
@@ -145,8 +149,17 @@ codexOauthRouter.put('/accounts/:id', (req, res) => {
     return;
   }
 
-  if (!setCodexAccountEnabled(getDb(), id, parsed.data.enabled)) {
-    res.status(404).json({ error: { message: 'Codex OAuth account not found', type: 'not_found' } });
+  try {
+    if (parsed.data.enabled !== undefined && !setCodexAccountEnabled(getDb(), id, parsed.data.enabled)) {
+      res.status(404).json({ error: { message: 'Codex OAuth account not found', type: 'not_found' } });
+      return;
+    }
+    if (parsed.data.resource_scope !== undefined && !setCodexAccountScope(getDb(), id, parsed.data.resource_scope)) {
+      res.status(404).json({ error: { message: 'Codex OAuth account not found', type: 'not_found' } });
+      return;
+    }
+  } catch (error) {
+    res.status(409).json({ error: { message: error instanceof Error ? error.message : String(error), type: 'scope_conflict' } });
     return;
   }
 
@@ -211,7 +224,7 @@ codexOauthRouter.get('/', (_req, res) => {
 
 
 // 删除账号
-codexOauthRouter.delete('/:id', (req, res) => {
+const deleteAccountHandler: RequestHandler = (req, res) => {
   const id = Number(req.params.id);
 
   if (!Number.isInteger(id)) {
@@ -224,12 +237,28 @@ codexOauthRouter.delete('/:id', (req, res) => {
     return;
   }
 
-  deleteCodexAccount(getDb(), id);
+  try {
+    if (!deleteCodexAccount(getDb(), id)) {
+      res.status(404).json({ error: { message: 'Codex OAuth account not found', type: 'not_found' } });
+      return;
+    }
+  } catch (error) {
+    res.status(409).json({
+      error: {
+        message: error instanceof Error ? error.message : String(error),
+        type: 'account_in_use',
+      },
+    });
+    return;
+  }
 
   res.json({
     success: true,
   });
-});
+};
+
+codexOauthRouter.delete('/accounts/:id', deleteAccountHandler);
+codexOauthRouter.delete('/:id', deleteAccountHandler);
 
 
 // 启用/禁用账号

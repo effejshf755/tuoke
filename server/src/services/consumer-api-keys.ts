@@ -1,15 +1,18 @@
 import crypto from 'crypto';
 import type { Db } from '../db/types.js';
+import { bindNewCodexPoolKey } from './resource-member-key.js';
 
 const KEY_PREFIX = 'tuoke-';
 const RANDOM_BYTES = 32;
+
+export type ConsumerApiKeyType = 'universal' | 'codex_pool' | 'resource_subpool';
 
 export interface ConsumerApiKey {
   id: number;
   userId: number;
   name: string;
   keyPrefix: string;
-  keyType: 'universal' | 'codex_pool';
+  keyType: ConsumerApiKeyType;
 
   status:
     | 'active'
@@ -39,7 +42,7 @@ interface StoredKey {
   name: string;
   keyPrefix: string;
   keyHash: string;
-  keyType: 'universal' | 'codex_pool';
+  keyType: ConsumerApiKeyType;
 
   status:
     | 'active'
@@ -208,7 +211,7 @@ export function listConsumerApiKeys(
         k.key_hash
           AS keyHash,
 
-        k.key_type
+        k.key_scope
           AS keyType,
 
         k.status,
@@ -327,7 +330,7 @@ export function createConsumerApiKey(
   userId: number,
   name: string,
   expiresAt?: string | null,
-  keyType: 'universal' | 'codex_pool' = 'universal',
+  keyType: ConsumerApiKeyType = 'universal',
 ): CreatedConsumerApiKey {
   const key =
     `${KEY_PREFIX}${
@@ -357,7 +360,8 @@ export function createConsumerApiKey(
           key_hash,
           expires_at,
           enabled,
-          key_type
+          key_type,
+          key_scope
         )
 
       VALUES (
@@ -367,6 +371,7 @@ export function createConsumerApiKey(
         ?,
         ?,
         1,
+        ?,
         ?
       )
     `)
@@ -376,6 +381,7 @@ export function createConsumerApiKey(
       keyPrefix,
       hashKey(key),
       expiresAt ?? null,
+      keyType === 'resource_subpool' ? 'codex_pool' : keyType,
       keyType,
     );
 
@@ -395,7 +401,7 @@ export function createConsumerApiKey(
         key_hash
           AS keyHash,
 
-        key_type
+        key_scope
           AS keyType,
 
         status,
@@ -423,6 +429,10 @@ export function createConsumerApiKey(
     .get(
       result.lastInsertRowid,
     ) as StoredKey;
+
+  if (keyType === 'resource_subpool') {
+    bindNewCodexPoolKey(db, userId, Number(result.lastInsertRowid));
+  }
 
   return {
     key,
@@ -478,7 +488,7 @@ export function validateConsumerApiKey(
         k.key_hash
           AS keyHash,
 
-        k.key_type
+        k.key_scope
           AS keyType,
 
         k.status,

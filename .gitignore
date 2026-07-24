@@ -18,5 +18,7 @@ update-hermes.sh
 
 # Monetization planning — private, never committed
 monetization/
+tmp/
+/*.tar.gz
 
 client/public/media/*.mp4

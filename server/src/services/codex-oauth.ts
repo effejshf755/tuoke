@@ -19,6 +19,7 @@ export interface CodexOAuthAccount {
   quota_reset_at: string | null;
   quota_synced_at: string | null;
   plan_type: string | null;
+  resource_scope: 'codex_pool' | 'resource_subpool';
 }
 
 export function listCodexAccounts(db: Db): CodexOAuthAccount[] {
@@ -36,8 +37,10 @@ export function listCodexAccounts(db: Db): CodexOAuthAccount[] {
         quota_remaining_percent,
         quota_reset_at,
         quota_synced_at,
-        plan_type
+        plan_type,
+        resource_scope
       FROM codex_oauth_accounts
+      WHERE deleted_at IS NULL
       ORDER BY id DESC
     `)
     .all() as Array<Omit<CodexOAuthAccount, 'models'>>;
@@ -99,6 +102,7 @@ export function createCodexAccount(
             last_error = NULL,
             failure_count = 0,
             cooldown_until = NULL,
+            deleted_at = NULL,
             updated_at = datetime('now')
         WHERE id = ?
       `).run(
@@ -140,6 +144,28 @@ export function createCodexAccount(
     data.token_expires_at ?? null,
   );
   return Number(result.lastInsertRowid);
+}
+
+export function setCodexAccountScope(
+  db: Db,
+  id: number,
+  scope: 'codex_pool' | 'resource_subpool',
+): boolean {
+  return db.transaction(() => {
+    const account = db.prepare('SELECT resource_scope scope FROM codex_oauth_accounts WHERE id = ?')
+      .get(id) as { scope: string } | undefined;
+    if (!account) return false;
+    if (account.scope === scope) return true;
+    const assigned = db.prepare(`SELECT 1 FROM resource_subpool_bindings
+      WHERE codex_account_id = ? AND status IN ('active', 'migrating')
+      UNION ALL
+      SELECT 1 FROM resource_subpools
+      WHERE pending_codex_account_id = ? AND status = 'waiting_resource' LIMIT 1`).get(id, id);
+    if (assigned) throw new Error('A Codex account assigned to a resource subpool cannot change scope');
+    db.prepare(`UPDATE codex_oauth_accounts SET resource_scope = ?, updated_at = datetime('now') WHERE id = ?`)
+      .run(scope, id);
+    return true;
+  })();
 }
 
 type CodexUsagePayload = {
@@ -197,11 +223,25 @@ async function syncCodexAccountQuota(
 export function deleteCodexAccount(
   db: Db,
   id: number,
-): void {
-  db.prepare(`
-    DELETE FROM codex_oauth_accounts
-    WHERE id = ?
-  `).run(id);
+): boolean {
+  return db.transaction(() => {
+    const account = db.prepare(`SELECT id FROM codex_oauth_accounts
+      WHERE id = ? AND deleted_at IS NULL`).get(id);
+    if (!account) return false;
+    const activeAssignment = db.prepare(`SELECT 1 FROM resource_subpool_bindings
+      WHERE codex_account_id = ? AND status IN ('active', 'migrating')
+      UNION ALL
+      SELECT 1 FROM resource_subpools
+      WHERE pending_codex_account_id = ? AND status = 'waiting_resource' LIMIT 1`).get(id, id);
+    if (activeAssignment) {
+      throw new Error('Codex account is assigned to a resource subpool and cannot be deleted');
+    }
+    const result = db.prepare(`UPDATE codex_oauth_accounts
+      SET enabled = 0, status = 'deleted', deleted_at = datetime('now'),
+          cooldown_until = NULL, updated_at = datetime('now')
+      WHERE id = ? AND deleted_at IS NULL`).run(id);
+    return result.changes === 1;
+  })();
 }
 
 export function setCodexAccountEnabled(

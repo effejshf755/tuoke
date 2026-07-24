@@ -236,7 +236,7 @@ proxyRouter.get('/models', (req: Request, res: Response) => {
     ? {
         ...baseCatalog,
         models: baseCatalog.models.filter(model =>
-          consumerKey.keyType === 'codex_pool'
+          consumerKey.keyType !== 'universal'
             ? model.id === 'codex'
             : model.id !== 'codex',
         ),
@@ -255,7 +255,7 @@ proxyRouter.get('/models', (req: Request, res: Response) => {
   res.json({
     object: 'list',
     data: [
-      ...(consumerKey?.keyType === 'codex_pool' ? [] : [
+      ...(consumerKey && consumerKey.keyType !== 'universal' ? [] : [
       {
         id: AUTO_MODEL_ID,
         object: 'model',
@@ -1721,6 +1721,22 @@ export async function chatCompletionHandler(req: Request, res: Response) {
               new Error(`empty completion from ${route.displayName} (stream produced no content and no tool calls)`),
               upstreamFinish === 'length' ? { skipBench: true } : {},
             );
+          }
+
+          if (clientGone) {
+            logRequest(
+              route.platform,
+              route.modelId,
+              route.keyId,
+              'error',
+              estimatedInputTokens + injectedHandoffTokens,
+              totalOutputTokens,
+              Date.now() - start,
+              'client disconnected after stream usage',
+              ttfbMs,
+              pinnedModelId,
+            );
+            return 'committed';
           }
 
           flushHeaders();

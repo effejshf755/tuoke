@@ -820,12 +820,12 @@ anthropicRouter.get('/models', (req: Request, res: Response, next: NextFunction)
     ? filterModelListingForConsumer(buildModelListing())
     : buildModelListing();
   const visibleModels = consumerKey
-    ? models.filter(model => consumerKey.keyType === 'codex_pool'
+    ? models.filter(model => consumerKey.keyType !== 'universal'
       ? model.id === 'codex'
       : model.id !== 'codex')
     : models;
   const data = [
-    ...(consumerKey?.keyType === 'codex_pool'
+    ...(consumerKey && consumerKey.keyType !== 'universal'
       ? []
       : [{ type: 'model' as const, id: 'auto', display_name: 'Auto (router picks the best available model)', created_at: MODEL_CREATED_AT }]),
     ...visibleModels

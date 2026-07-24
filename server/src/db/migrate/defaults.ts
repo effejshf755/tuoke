@@ -35,6 +35,17 @@ import * as codexUsageStats from '../migrations/20260723_000026_codex_usage_stat
 import * as codexUsageRecords from '../migrations/20260723_000027_codex_usage_records.js';
 import * as codexAccountQuota from '../migrations/20260723_000028_codex_account_quota.js';
 import * as freeModelAccess from '../migrations/20260723_000029_free_model_access.js';
+import * as resourceArchitecture from '../migrations/20260724_000030_resource_architecture.js';
+import * as resourceProductsOrders from '../migrations/20260725_000031_resource_products_orders.js';
+import * as resourceGroupingStatus from '../migrations/20260725_000032_resource_grouping_status.js';
+import * as resourceSubpoolActivation from '../migrations/20260725_000033_resource_subpool_activation.js';
+import * as resourceAdminAudit from '../migrations/20260725_000034_resource_admin_audit.js';
+import * as resourceWalletPurchase from '../migrations/20260725_000035_resource_wallet_purchase.js';
+import * as resourceSubpoolEntitlementFreeze from '../migrations/20260725_000036_resource_subpool_entitlement_freeze.js';
+import * as resourceScopeIsolation from '../migrations/20260725_000037_resource_scope_isolation.js';
+import * as codexAccountSoftDelete from '../migrations/20260725_000038_codex_account_soft_delete.js';
+import * as resourcePartialSettlement from '../migrations/20260725_000039_resource_partial_settlement.js';
+import * as resourceOperationalAlerts from '../migrations/20260725_000040_resource_operational_alerts.js';
 
 export interface MigrationModule {
   up(db: Db): void;
@@ -82,6 +93,17 @@ export const CODEX_USAGE_STATS_FILENAME = '20260723_000026_codex_usage_stats.ts'
 export const CODEX_USAGE_RECORDS_FILENAME = '20260723_000027_codex_usage_records.ts';
 export const CODEX_ACCOUNT_QUOTA_FILENAME = '20260723_000028_codex_account_quota.ts';
 export const FREE_MODEL_ACCESS_FILENAME = '20260723_000029_free_model_access.ts';
+export const RESOURCE_ARCHITECTURE_FILENAME = '20260724_000030_resource_architecture.ts';
+export const RESOURCE_PRODUCTS_ORDERS_FILENAME = '20260725_000031_resource_products_orders.ts';
+export const RESOURCE_GROUPING_STATUS_FILENAME = '20260725_000032_resource_grouping_status.ts';
+export const RESOURCE_SUBPOOL_ACTIVATION_FILENAME = '20260725_000033_resource_subpool_activation.ts';
+export const RESOURCE_ADMIN_AUDIT_FILENAME = '20260725_000034_resource_admin_audit.ts';
+export const RESOURCE_WALLET_PURCHASE_FILENAME = '20260725_000035_resource_wallet_purchase.ts';
+export const RESOURCE_SUBPOOL_ENTITLEMENT_FREEZE_FILENAME = '20260725_000036_resource_subpool_entitlement_freeze.ts';
+export const RESOURCE_SCOPE_ISOLATION_FILENAME = '20260725_000037_resource_scope_isolation.ts';
+export const CODEX_ACCOUNT_SOFT_DELETE_FILENAME = '20260725_000038_codex_account_soft_delete.ts';
+export const RESOURCE_PARTIAL_SETTLEMENT_FILENAME = '20260725_000039_resource_partial_settlement.ts';
+export const RESOURCE_OPERATIONAL_ALERTS_FILENAME = '20260725_000040_resource_operational_alerts.ts';
 
 export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: LEGACY_BASELINE_FILENAME, module: legacyBaseline },
@@ -120,4 +142,15 @@ export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: CODEX_USAGE_RECORDS_FILENAME, module: codexUsageRecords },
   { filename: CODEX_ACCOUNT_QUOTA_FILENAME, module: codexAccountQuota },
   { filename: FREE_MODEL_ACCESS_FILENAME, module: freeModelAccess },
+  { filename: RESOURCE_ARCHITECTURE_FILENAME, module: resourceArchitecture },
+  { filename: RESOURCE_PRODUCTS_ORDERS_FILENAME, module: resourceProductsOrders },
+  { filename: RESOURCE_GROUPING_STATUS_FILENAME, module: resourceGroupingStatus },
+  { filename: RESOURCE_SUBPOOL_ACTIVATION_FILENAME, module: resourceSubpoolActivation },
+  { filename: RESOURCE_ADMIN_AUDIT_FILENAME, module: resourceAdminAudit },
+  { filename: RESOURCE_WALLET_PURCHASE_FILENAME, module: resourceWalletPurchase },
+  { filename: RESOURCE_SUBPOOL_ENTITLEMENT_FREEZE_FILENAME, module: resourceSubpoolEntitlementFreeze },
+  { filename: RESOURCE_SCOPE_ISOLATION_FILENAME, module: resourceScopeIsolation },
+  { filename: CODEX_ACCOUNT_SOFT_DELETE_FILENAME, module: codexAccountSoftDelete },
+  { filename: RESOURCE_PARTIAL_SETTLEMENT_FILENAME, module: resourcePartialSettlement },
+  { filename: RESOURCE_OPERATIONAL_ALERTS_FILENAME, module: resourceOperationalAlerts },
 ];

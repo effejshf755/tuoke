@@ -1,8 +1,10 @@
 import type { Db } from '../db/types.js';
+import { raiseResourceAlert } from './resource-alerts.js';
 import { getDb } from '../db/index.js';
 import {
   getClientContext,
   setCodexUsageRecordId,
+  markResourceUsageObserved,
 } from '../lib/client-context.js';
 
 export interface CodexUsageResult {
@@ -38,6 +40,7 @@ export function recordCodexUsage(result: CodexUsageResult): number {
   const inputTokens = safeCount(result.inputTokens);
   const outputTokens = safeCount(result.outputTokens);
   const totalTokens = inputTokens + outputTokens;
+  if (totalTokens > 0) markResourceUsageObserved();
   const aggregateApiKeyId = context.consumerApiKeyId ?? 0;
   const error = result.error?.slice(0, 2_000) || null;
 
@@ -136,6 +139,21 @@ export function recordCodexUsage(result: CodexUsageResult): number {
             last_error=?, updated_at=datetime('now')
         WHERE id=?
       `).run(error, result.accountDbId);
+      const bindings = db.prepare(`SELECT subpool_id subpoolId FROM resource_subpool_bindings
+        WHERE codex_account_id = ? AND status = 'active'`).all(result.accountDbId) as Array<{ subpoolId: number }>;
+      if (bindings.length === 0) {
+        raiseResourceAlert(db, { severity: 'critical', alertType: 'codex_oauth_invalid',
+          sourceType: 'codex_account', sourceId: result.accountDbId,
+          message: `Codex OAuth account ${result.accountDbId} authentication failed`, details: { error } });
+      } else {
+        for (const binding of bindings) {
+          raiseResourceAlert(db, { severity: 'critical', alertType: 'codex_oauth_invalid',
+            sourceType: 'codex_account_subpool', sourceId: `${result.accountDbId}:${binding.subpoolId}`,
+            subpoolId: binding.subpoolId,
+            message: `Dedicated Codex account ${result.accountDbId} authentication failed`,
+            details: { accountId: result.accountDbId, error } });
+        }
+      }
     } else {
       db.prepare(`
         UPDATE codex_oauth_accounts

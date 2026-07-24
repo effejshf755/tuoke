@@ -30,7 +30,15 @@ import {
 import {
   setWalletReservationId,
   setConsumerIdentity,
+  setResourceReservation,
+  getClientContext,
 } from '../lib/client-context.js';
+import {
+  estimateCodexQuotaUnits,
+  releaseSubpoolQuota,
+  reserveSubpoolQuota,
+  ResourceQuotaError,
+} from '../services/resource-quota.js';
 import {
   consumeFreeModelRequest,
   getAvailableBalanceMicro,
@@ -147,7 +155,7 @@ export function consumerQuota(
     `).get(requestedModel))
   );
 
-  if (key.keyType !== 'codex_pool' && requestsCodexPool) {
+  if (key.keyType === 'universal' && requestsCodexPool) {
     res.status(403).json({
       error: {
         message: 'This API key does not have access to Codex pool',
@@ -158,7 +166,7 @@ export function consumerQuota(
   }
 
   if (
-    key.keyType === 'codex_pool'
+    key.keyType !== 'universal'
     && !requestsCodexPool
   ) {
     res.status(403).json({
@@ -185,7 +193,7 @@ export function consumerQuota(
    * Calculate the maximum safe authorization amount
    * before calling any upstream model.
    */
-  const estimate = key.keyType === 'codex_pool'
+  const estimate = key.keyType !== 'universal'
     ? estimateCodexBillingReservation(db, req.body)
     : estimateBillingReservation(db, req.body);
 
@@ -247,6 +255,25 @@ export function consumerQuota(
     return;
   }
 
+  if (key.keyType === 'resource_subpool') {
+    let resourceReservation: ReturnType<typeof reserveSubpoolQuota>;
+    try {
+      resourceReservation = reserveSubpoolQuota(db, key.userId, key.id, estimateCodexQuotaUnits(req.body));
+      setResourceReservation(resourceReservation);
+    } catch (error) {
+      if (error instanceof ResourceQuotaError) {
+        res.status(error.code === 'resource_quota_exhausted' ? 429 : 403).json({ error: { message: error.message, type: error.code } });
+        return;
+      }
+      throw error;
+    }
+    // Resource products are prepaid entitlements. Once their isolated quota
+    // reservation succeeds, the request must not enter PAYG wallet billing.
+    registerResourceCleanup(res, db, resourceReservation.reservationId);
+    next();
+    return;
+  }
+
   if (estimate.reserveMicro <= 0) {
     next();
     return;
@@ -277,7 +304,7 @@ export function consumerQuota(
 
       key.userId,
 
-      key.keyType === 'codex_pool' ? key.id : null,
+      null,
 
       estimate.requestedModel,
 
@@ -383,4 +410,26 @@ export function consumerQuota(
   );
 
   next();
+}
+
+function registerResourceCleanup(res: Response, db: ReturnType<typeof getDb>, reservationId: number | null): void {
+  if (reservationId === null) return;
+  const requestContext = getClientContext();
+  let scheduled = false;
+  const cleanup = () => {
+    if (scheduled) return;
+    scheduled = true;
+    const timer = setTimeout(() => {
+      try {
+        // A disconnected stream may still be unwinding the Provider generator
+        // and writing its partial usage record. Never release known usage from
+        // this transport-level safety hook; request-log owns its settlement.
+        if (!requestContext.resourceUsageObserved) releaseSubpoolQuota(db, reservationId);
+      }
+      catch (error) { console.error('[Resource Quota] Failed to release unfinished reservation:', reservationId, error); }
+    }, 5000);
+    timer.unref();
+  };
+  res.once('finish', cleanup);
+  res.once('close', cleanup);
 }

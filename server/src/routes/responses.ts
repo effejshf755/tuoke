@@ -667,6 +667,20 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
             );
           }
 
+          if (clientGone) {
+            logRequest(
+              route.platform,
+              route.modelId,
+              route.keyId,
+              'error',
+              estimatedInputTokens,
+              totalOutputTokens,
+              Date.now() - start,
+              'client disconnected after stream usage',
+            );
+            return 'committed';
+          }
+
           // Finalize any open text item.
           if (msgItemId !== null) {
             sse('response.output_text.done', { item_id: msgItemId, output_index: 0, content_index: 0, text: msgText });
@@ -723,7 +737,7 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
               latencyMs: Date.now() - start,
               error: safe,
             });
-            logRequest(route.platform, route.modelId, route.keyId, 'error', estimatedInputTokens, 0, Date.now() - start, safe);
+            logRequest(route.platform, route.modelId, route.keyId, 'error', estimatedInputTokens, totalOutputTokens, Date.now() - start, safe);
             sse('response.failed', { response: { id: responseId, object: 'response', status: 'failed', error: { message: `Provider error (${route.displayName}): stream interrupted`, type: 'stream_error' } } });
             res.end();
             return 'committed';

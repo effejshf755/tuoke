@@ -42,6 +42,8 @@ import type { Config } from './lib/config.js';
 import { loadConfig } from './lib/config.js';
 import { getSetting } from './db/index.js';
 import { publicPlatformRouter } from './routes/public-platform.js';
+import { adminResourcesRouter } from './routes/admin-resources.js';
+import { resourceUserRouter } from './routes/resource-user.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -112,6 +114,8 @@ export function createApp(config?: Config) {
   app.use('/api/admin/recharge', requireAuth, requireAdmin, adminRechargeRouter);
   app.use('/api/admin/settings', requireAuth, requireAdmin, adminPlatformSettingsRouter);
   app.use('/api/admin/codex', requireAuth, requireAdmin, codexOauthRouter);
+  app.use('/api/admin/resources', requireAuth, requireAdmin, adminResourcesRouter);
+  app.use('/api/resources', requireAuth, resourceUserRouter);
   app.use('/api/admin/codex-auth', codexAuthRouter);
 
   // Static, unauthenticated API reference: GET /v1/docs (viewer) and

@@ -48,7 +48,7 @@ const createSchema = z.object({
     .optional(),
 
   key_type: z
-    .enum(['universal', 'codex_pool'])
+    .enum(['universal', 'codex_pool', 'resource_subpool'])
     .default('universal'),
 });
 

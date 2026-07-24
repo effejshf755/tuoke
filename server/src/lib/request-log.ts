@@ -10,6 +10,8 @@ import {
   finalizeCodexUsageRecord,
   getCodexUsageTokens,
 } from '../services/codex-usage.js';
+import { finalizeSubpoolQuota } from '../services/resource-quota.js';
+import { finalizeResourceDispatch } from '../services/resource-scheduler.js';
 
 type LogTx = ReturnType<typeof getDb>;
 
@@ -72,11 +74,12 @@ export function logRequest(
     const codexUsageRecordId = platform === 'openai-codex'
       ? takeCodexUsageRecordId()
       : null;
-    const codexTokens = codexUsageRecordId !== null && status === 'success'
+    const codexTokens = codexUsageRecordId !== null
       ? getCodexUsageTokens(db, codexUsageRecordId)
       : null;
-    const loggedInputTokens = codexTokens?.inputTokens ?? inputTokens;
-    const loggedOutputTokens = codexTokens?.outputTokens ?? outputTokens;
+    const hasProviderUsage = Boolean(codexTokens && (codexTokens.inputTokens > 0 || codexTokens.outputTokens > 0));
+    const loggedInputTokens = hasProviderUsage ? codexTokens!.inputTokens : inputTokens;
+    const loggedOutputTokens = hasProviderUsage ? codexTokens!.outputTokens : outputTokens;
     const tx = db.transaction(() => {
       const insert = db.prepare(`
         INSERT INTO requests (platform, model_id, key_id, status, input_tokens, output_tokens, latency_ms, error, ttfb_ms, requested_model, client_ip, client_user_agent, consumer_user_id, consumer_api_key_id)
@@ -115,60 +118,93 @@ export function logRequest(
 
     const requestId = tx();
 
-    /*
-     * Automatic PAYG settlement.
-     *
-     * chargeRequest decides whether the request is:
-     * - consumer billable
-     * - admin/system exempt
-     * - free
-     * - failed/non-billable
-     * - missing a billing rule
-     */
-    try {
-      const reservationId =
-        getClientContext()
-          .walletReservationId;
-
-      const billingResult =
-        reservationId !== null
-          ? chargeReservedRequest(
-              db,
-              requestId,
-              reservationId,
-            )
-          : chargeRequest(
-              db,
-              requestId,
-            );
-
-      if (
-        billingResult.status ===
-        'no_billing_rule'
-      ) {
-        console.warn(
-          '[Billing] No billing rule:',
+    if (client.resourceQuotaReservationId !== null) {
+      try {
+        const observedUsage = hasProviderUsage || outputTokens > 0;
+        const settlementStatus = status === 'success'
+          ? 'success'
+          : observedUsage
+            ? 'partial'
+            : 'failed_before_usage';
+        const consumesQuota = settlementStatus !== 'failed_before_usage';
+        finalizeSubpoolQuota(
+          db,
+          client.resourceQuotaReservationId,
           requestId,
-          platform,
-          modelId,
+          consumesQuota ? loggedInputTokens + loggedOutputTokens : null,
+          settlementStatus,
+        );
+        if (client.resourceDispatchId !== null) {
+          finalizeResourceDispatch(db, client.resourceDispatchId, consumesQuota, error);
+        }
+      } catch (resourceError) {
+        console.error('[Resource Quota] Settlement failed:', requestId, resourceError);
+      }
+    }
+
+    const isResourceEntitlementRequest = client.consumerApiKeyType === 'resource_subpool'
+      && client.resourceQuotaReservationId !== null;
+
+    if (isResourceEntitlementRequest) {
+      // Resource products are prepaid. Their successful requests settle only
+      // the isolated resource ledger and must never enter PAYG wallet billing.
+      db.prepare(`UPDATE requests
+        SET billing_status = 'exempt', billing_amount_micro = 0
+        WHERE id = ? AND billing_status = 'unbilled'`).run(requestId);
+    } else {
+      /*
+       * Automatic PAYG settlement.
+       *
+       * chargeRequest decides whether the request is:
+       * - consumer billable
+       * - admin/system exempt
+       * - free
+       * - failed/non-billable
+       * - missing a billing rule
+       */
+      try {
+        const reservationId = client.walletReservationId;
+
+        const billingResult =
+          reservationId !== null
+            ? chargeReservedRequest(
+                db,
+                requestId,
+                reservationId,
+              )
+            : chargeRequest(
+                db,
+                requestId,
+              );
+
+        if (
+          billingResult.status ===
+          'no_billing_rule'
+        ) {
+          console.warn(
+            '[Billing] No billing rule:',
+            requestId,
+            platform,
+            modelId,
+          );
+        }
+
+        if (
+          billingResult.status ===
+          'insufficient_balance'
+        ) {
+          console.warn(
+            '[Billing] Insufficient balance during settlement:',
+            requestId,
+          );
+        }
+      } catch (billingError) {
+        console.error(
+          '[Billing] Settlement failed:',
+          requestId,
+          billingError,
         );
       }
-
-      if (
-        billingResult.status ===
-        'insufficient_balance'
-      ) {
-        console.warn(
-          '[Billing] Insufficient balance during settlement:',
-          requestId,
-        );
-      }
-    } catch (billingError) {
-      console.error(
-        '[Billing] Settlement failed:',
-        requestId,
-        billingError,
-      );
     }
 
     if (codexUsageRecordId !== null) {

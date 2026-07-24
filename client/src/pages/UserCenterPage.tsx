@@ -20,7 +20,7 @@ type Expiration =
   | '90d'
   | 'custom'
 
-type KeyType = 'universal' | 'codex_pool'
+type KeyType = 'universal' | 'codex_pool' | 'resource_subpool'
 
 type Key = {
   id: number
@@ -546,6 +546,10 @@ export default function UserCenterPage() {
             <label className="flex cursor-pointer gap-3 rounded-xl border p-3 text-sm">
               <input type="radio" name="user-center-key-type" checked={keyType === 'codex_pool'} onChange={() => setKeyType('codex_pool')} />
               <span><span className="block font-medium">Codex 账号池</span><span className="text-xs text-muted-foreground">使用 Codex OAuth 账号池资源。</span></span>
+            </label>
+            <label className="flex cursor-pointer gap-3 rounded-xl border p-3 text-sm">
+              <input type="radio" name="user-center-key-type" checked={keyType === 'resource_subpool'} onChange={() => setKeyType('resource_subpool')} />
+              <span><span className="block font-medium">Codex 拼单</span><span className="text-xs text-muted-foreground">仅使用已购买并激活的 Codex 拼单套餐额度。</span></span>
             </label>
           </fieldset>
         </div>

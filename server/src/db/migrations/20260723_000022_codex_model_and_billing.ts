@@ -46,6 +46,13 @@ export function up(db: Db): void {
     1000,
     1,
   );
+
+  db.prepare(`
+    INSERT OR IGNORE INTO fallback_config (model_db_id, priority, enabled)
+    SELECT id, (SELECT COALESCE(MAX(priority), 0) + 1 FROM fallback_config), 1
+      FROM models
+     WHERE platform = 'openai-codex' AND model_id = 'codex'
+  `).run();
 }
 
 export function down(db: Db): void {
@@ -53,6 +60,10 @@ export function down(db: Db): void {
     DELETE FROM model_billing_rules
     WHERE platform = ? AND model_id = ?
   `).run('openai-codex', 'codex');
+
+  db.prepare(`DELETE FROM fallback_config WHERE model_db_id IN (
+    SELECT id FROM models WHERE platform = ? AND model_id = ?
+  )`).run('openai-codex', 'codex');
 
   db.prepare(`
     DELETE FROM models

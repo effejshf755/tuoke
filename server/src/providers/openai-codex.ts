@@ -158,7 +158,10 @@ import type {
   
   function getAvailableCodexAccount(routeToken?: string, modelId?: string) {
     const match = /^codex-account:(\d+)$/.exec(routeToken ?? '');
-    const selectedAccountId = match ? Number(match[1]) : null;
+    if (!match) {
+      throw new Error('Codex account was not selected by router');
+    }
+    const selectedAccountId = Number(match[1]);
     const row = getDb().prepare(`
       SELECT a.*
       FROM codex_oauth_accounts a
@@ -170,7 +173,7 @@ import type {
           OR a.quota_remaining_percent > 0
           OR (a.quota_reset_at IS NOT NULL AND datetime(a.quota_reset_at) <= datetime('now'))
         )
-        AND (? IS NULL OR a.id = ?)
+        AND a.id = ?
         AND (
           ? IS NULL OR EXISTS (
             SELECT 1 FROM codex_oauth_account_models am
@@ -179,7 +182,7 @@ import type {
         )
       ORDER BY a.last_used_at ASC, a.id ASC
       LIMIT 1
-    `).get(selectedAccountId, selectedAccountId, modelId ?? null, modelId ?? null);
+    `).get(selectedAccountId, modelId ?? null, modelId ?? null);
   
     if (!row) {
       throw new Error('No Codex account available');
@@ -415,6 +418,8 @@ import type {
           accountDbId: id,
           modelId: _modelId,
           success: false,
+          inputTokens: outputCharacters > 0 ? estimatedInputTokens(_messages) : undefined,
+          outputTokens: outputCharacters > 0 ? Math.ceil(outputCharacters / 4) : undefined,
           error: redactSensitiveText(tracked.message ?? String(error)),
           authenticationFailure: authenticationFailure(error),
           quotaExhausted: quotaExhaustionFailure(error),
@@ -427,6 +432,8 @@ import type {
             accountDbId,
             modelId: _modelId,
             success: false,
+            inputTokens: outputCharacters > 0 ? estimatedInputTokens(_messages) : undefined,
+            outputTokens: outputCharacters > 0 ? Math.ceil(outputCharacters / 4) : undefined,
             error: 'Codex stream ended before completion',
           });
         }

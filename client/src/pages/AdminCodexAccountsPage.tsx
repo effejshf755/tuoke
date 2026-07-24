@@ -22,6 +22,7 @@ type CodexAccount = {
   quota_reset_at: string | null
   quota_synced_at: string | null
   plan_type: string | null
+  resource_scope: 'codex_pool' | 'resource_subpool'
 }
 
 type AccountsResponse = { accounts: CodexAccount[] }
@@ -83,6 +84,7 @@ export default function AdminCodexAccountsPage() {
   const [isStartingAuth, setIsStartingAuth] = useState(false)
   const [checkingAccountId, setCheckingAccountId] = useState<number | null>(null)
   const [expandedModelAccounts, setExpandedModelAccounts] = useState<Set<number>>(() => new Set())
+  const [pendingAccountScopes, setPendingAccountScopes] = useState<Record<number, CodexAccount['resource_scope']>>({})
   const { data, isLoading, error, dataUpdatedAt } = useQuery<AccountsResponse>({
     queryKey: ['admin-codex-accounts'],
     queryFn: () => apiFetch('/api/admin/codex/accounts'),
@@ -96,6 +98,26 @@ export default function AdminCodexAccountsPage() {
         body: JSON.stringify({ enabled }),
       }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin-codex-accounts'] }),
+  })
+
+  const updateAccountScope = useMutation({
+    mutationFn: ({ id, resourceScope }: { id: number; resourceScope: CodexAccount['resource_scope'] }) =>
+      apiFetch(`/api/admin/codex/accounts/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ resource_scope: resourceScope }),
+      }),
+    onSuccess: async (_result, variables) => {
+      setPendingAccountScopes((current) => {
+        const next = { ...current }
+        delete next[variables.id]
+        return next
+      })
+      setImportResult({ imported: 0, error: null })
+      await queryClient.invalidateQueries({ queryKey: ['admin-codex-accounts'] })
+    },
+    onError: (mutationError) => {
+      setImportResult({ imported: 0, error: mutationError instanceof Error ? mutationError.message : '账号用途修改失败' })
+    },
   })
 
   const deleteAccount = useMutation({
@@ -299,6 +321,8 @@ export default function AdminCodexAccountsPage() {
           <div className="mt-5 grid items-start gap-4 lg:grid-cols-2">
             {accounts.map((account) => {
               const enabled = Boolean(account.enabled)
+              const pendingScope = pendingAccountScopes[account.id] ?? account.resource_scope
+              const scopeChanged = pendingScope !== account.resource_scope
               const modelsExpanded = expandedModelAccounts.has(account.id)
               const visibleModels = modelsExpanded ? account.models : account.models.slice(0, 3)
               return (
@@ -326,6 +350,31 @@ export default function AdminCodexAccountsPage() {
                   </div>
 
                   <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-xl border border-border/60 bg-background/45 p-3">
+                      <label className="text-xs text-muted-foreground" htmlFor={`account-scope-${account.id}`}>账号用途</label>
+                      <select
+                        id={`account-scope-${account.id}`}
+                        value={pendingScope}
+                        disabled={updateAccountScope.isPending}
+                        onChange={(event) => setPendingAccountScopes((current) => ({
+                          ...current,
+                          [account.id]: event.target.value as CodexAccount['resource_scope'],
+                        }))}
+                        className="mt-1 w-full rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
+                      >
+                        <option value="codex_pool">Codex 账号池</option>
+                        <option value="resource_subpool">Codex 拼单专用</option>
+                      </select>
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="mt-2 w-full"
+                        disabled={!scopeChanged || updateAccountScope.isPending}
+                        onClick={() => updateAccountScope.mutate({ id: account.id, resourceScope: pendingScope })}
+                      >
+                        {updateAccountScope.isPending ? '正在更换...' : '确认更换'}
+                      </Button>
+                    </div>
                     <Info
                       label="剩余额度"
                       value={account.quota_remaining_percent == null

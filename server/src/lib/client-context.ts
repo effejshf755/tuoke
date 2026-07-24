@@ -6,9 +6,15 @@ export interface ClientContext {
   userAgent: string | null;
   consumerUserId: number | null;
   consumerApiKeyId: number | null;
-  consumerApiKeyType: 'universal' | 'codex_pool' | null;
+  consumerApiKeyType: 'universal' | 'codex_pool' | 'resource_subpool' | null;
   walletReservationId: number | null;
   codexUsageRecordId: number | null;
+  resourceSubpoolId: number | null;
+  resourceMemberId: number | null;
+  resourceQuotaReservationId: number | null;
+  resourceRequestCorrelationId: string | null;
+  resourceDispatchId: number | null;
+  resourceUsageObserved: boolean;
 }
 
 // Request-scoped caller identity, readable from anywhere below the middleware
@@ -24,6 +30,12 @@ function createContext(ip: string | null, userAgent: string | null): ClientConte
     consumerApiKeyType: { value: null, writable: true, enumerable: false },
     walletReservationId: { value: null, writable: true, enumerable: false },
     codexUsageRecordId: { value: null, writable: true, enumerable: false },
+    resourceSubpoolId: { value: null, writable: true, enumerable: false },
+    resourceMemberId: { value: null, writable: true, enumerable: false },
+    resourceQuotaReservationId: { value: null, writable: true, enumerable: false },
+    resourceRequestCorrelationId: { value: null, writable: true, enumerable: false },
+    resourceDispatchId: { value: null, writable: true, enumerable: false },
+    resourceUsageObserved: { value: false, writable: true, enumerable: false },
   });
   return context;
 }
@@ -62,7 +74,7 @@ export function getClientContext(): ClientContext {
 export function setConsumerIdentity(
   userId: number,
   keyId: number,
-  keyType: 'universal' | 'codex_pool' = 'universal',
+  keyType: 'universal' | 'codex_pool' | 'resource_subpool' = 'universal',
 ): void {
   const context = storage.getStore();
   if (context) {
@@ -88,6 +100,30 @@ export function setWalletReservationId(
 export function setCodexUsageRecordId(recordId: number | null): void {
   const context = storage.getStore();
   if (context) context.codexUsageRecordId = recordId;
+}
+
+export function setResourceReservation(input: {
+  subpoolId: number;
+  memberId: number;
+  reservationId: number;
+  requestCorrelationId: string;
+}): void {
+  const context = storage.getStore();
+  if (!context) return;
+  context.resourceSubpoolId = input.subpoolId;
+  context.resourceMemberId = input.memberId;
+  context.resourceQuotaReservationId = input.reservationId;
+  context.resourceRequestCorrelationId = input.requestCorrelationId;
+}
+
+export function setResourceDispatchId(dispatchId: number | null): void {
+  const context = storage.getStore();
+  if (context) context.resourceDispatchId = dispatchId;
+}
+
+export function markResourceUsageObserved(): void {
+  const context = storage.getStore();
+  if (context && context.resourceQuotaReservationId !== null) context.resourceUsageObserved = true;
 }
 
 /**

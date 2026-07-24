@@ -16,11 +16,20 @@ function insertState(row: {
   remaining: number | null;
   resetAt: string | null;
 }) {
+  ensureEnabledKey(row.platform, row.keyId);
   getDb().prepare(`
     INSERT INTO provider_quota_state
       (platform, key_id, quota_pool_key, metric, limit_value, remaining_value, reset_at)
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `).run(row.platform, row.keyId, row.pool, row.metric, row.limit, row.remaining, row.resetAt);
+}
+
+function ensureEnabledKey(platform: string, keyId: number) {
+  getDb().prepare(`
+    INSERT OR IGNORE INTO api_keys
+      (id, platform, label, encrypted_key, iv, auth_tag, status, enabled)
+    VALUES (?, ?, ?, 'test', 'test', 'test', 'active', 1)
+  `).run(keyId, platform, `quota-test-${keyId}`);
 }
 
 function readState(platform: string, keyId: number, pool: string, metric: string) {
@@ -59,6 +68,7 @@ describe('provider-quota: record + read round-trip', () => {
   });
 
   it('records an observation and surfaces it via getQuotaStateForKeys', () => {
+    ensureEnabledKey('groq', 7);
     const rec = recordQuotaObservation({
       platform: 'groq',
       keyId: 7,

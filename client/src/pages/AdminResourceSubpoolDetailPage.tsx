@@ -1,0 +1,59 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { CirclePause, PackageCheck, Play, RefreshCw, Settings2, Unlink } from 'lucide-react'
+import { useState } from 'react'
+import { Link, useParams } from 'react-router-dom'
+
+import { EmptyState } from '@/components/empty-state'
+import { Badge } from '@/components/ui/badge'
+import { Button, buttonVariants } from '@/components/ui/button'
+import { Dialog, DialogClose, DialogDescription, DialogPopup, DialogTitle } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { CardSkeleton } from '@/components/ui/skeleton'
+import { apiFetch } from '@/lib/api'
+import { toast } from '@/lib/toast'
+import { formatBeijingDateTime } from '@/lib/utils'
+
+type Account = { id:number; label:string; status:string; quotaRemainingPercent:number|null }
+type Member = { id:number; email:string; status:string; apiKeyName:string|null; memberQuotaId:number|null; allocationUnits:number|null; usedUnits:number|null; reservedUnits:number|null }
+type Pool = { id:number; name:string; productName:string|null; status:string; mode:string; memberLimit:number; startsAt:string|null; endsAt:string|null; created_at?:string; accountId:number|null; accountLabel:string|null; accountStatus:string|null; accountQuotaRemainingPercent:number|null; accountQuotaResetAt:string|null; pendingAccountId:number|null; allocationUnits:number|null; usedUnits:number|null; reservedUnits:number|null }
+
+const number = (value:number|null|undefined) => new Intl.NumberFormat('zh-CN').format(Number(value || 0))
+const quota = (value:number|null|undefined) => `${number(value)} units`
+
+export function AdminResourceSubpoolDetailPage() {
+  const { id = '' } = useParams()
+  const queryClient = useQueryClient()
+  const [selectedAccount, setSelectedAccount] = useState('')
+  const detail = useQuery<{pool:Pool;members:Member[]}>({ queryKey:['admin-resource-subpool',id], queryFn:()=>apiFetch(`/api/admin/resources/subpools/${id}`), refetchInterval:10000 })
+  const pool = detail.data?.pool
+  const accounts = useQuery<{accounts:Account[]}>({ queryKey:['admin-resource-accounts'], queryFn:()=>apiFetch('/api/admin/resources/available-codex-accounts'), enabled:['waiting_resource','active','paused'].includes(pool?.status ?? '') })
+  const refresh = () => {
+    queryClient.invalidateQueries({queryKey:['admin-resource-subpool',id]})
+    queryClient.invalidateQueries({queryKey:['admin-resource-subpools']})
+    queryClient.invalidateQueries({queryKey:['admin-resource-accounts']})
+    queryClient.invalidateQueries({queryKey:['admin-resource-audit']})
+  }
+  const bind = useMutation({mutationFn:()=>apiFetch(`/api/admin/resources/subpools/${id}/binding`,{method:'PUT',body:JSON.stringify({codexAccountId:Number(selectedAccount)})}),onSuccess:()=>{toast.success('Codex 账号已选择');refresh()}})
+  const activate = useMutation({mutationFn:()=>apiFetch(`/api/admin/resources/subpools/${id}/activate`,{method:'POST'}),onSuccess:()=>{toast.success('小号池已激活');refresh()}})
+  const operation = useMutation({mutationFn:({action,accountId}:{action:string;accountId?:number})=>apiFetch(`/api/admin/resources/subpools/${id}/${action}`,{method:'POST',body:accountId?JSON.stringify({accountId}):undefined}),onSuccess:(_data,input)=>{toast.success(input.action==='pause'?'小号池已暂停':input.action==='resume'?'小号池已恢复':input.action==='unbind-account'?'账号已解绑':'执行账号已更换');setSelectedAccount('');refresh()}})
+  const run = (action:string, accountId?:number) => {
+    const message = action==='pause'?'确认暂停小号池并拒绝新的 Codex 请求？':action==='unbind-account'?'解绑后小号池将保持暂停，确认解绑？':action==='change-account'?'确认替换 Dedicated 执行账号？':null
+    if (!message || window.confirm(message)) operation.mutate({action,accountId})
+  }
+  const members = detail.data?.members ?? []
+  const remaining = Math.max(0,Number(pool?.allocationUnits||0)-Number(pool?.usedUnits||0)-Number(pool?.reservedUnits||0))
+
+  return <div className="mx-auto w-full max-w-7xl">
+    <div className="flex items-end justify-between gap-4"><div><h1 className="text-2xl font-semibold">小号池详情</h1><p className="mt-1 text-sm text-muted-foreground">查看成员权益、执行资源并处理运行异常。</p></div><Link to="/admin/resources/subpools" className={buttonVariants({variant:'outline'})}>返回列表</Link></div>
+    {detail.isLoading ? <CardSkeleton className="mt-6 h-96" /> : !pool ? <div className="mt-6"><EmptyState title="小号池不存在" /></div> : <div className="mt-6 space-y-6">
+      <section className="rounded-2xl border bg-card p-5"><div className="flex flex-wrap justify-between gap-4"><div><div className="flex items-center gap-3"><h2 className="text-lg font-semibold">{pool.productName ?? pool.name}</h2><Badge variant="outline">{pool.status}</Badge></div><p className="mt-2 text-sm text-muted-foreground">小号池 #{pool.id} · {pool.mode}</p></div><div className="flex flex-wrap gap-2">{pool.status==='active'&&<Button variant="outline" disabled={operation.isPending} onClick={()=>run('pause')}><CirclePause/>暂停</Button>}{pool.status==='paused'&&pool.accountId&&<Button variant="outline" disabled={operation.isPending} onClick={()=>run('resume')}><Play/>恢复</Button>}{['active','paused'].includes(pool.status)&&pool.accountId&&<Button variant="outline" disabled={operation.isPending} onClick={()=>run('unbind-account')}><Unlink/>解绑账号</Button>}</div></div><div className="mt-6 grid gap-4 border-t pt-5 sm:grid-cols-2 lg:grid-cols-4"><Info label="创建时间" value={formatBeijingDateTime(pool.created_at)}/><Info label="开始时间" value={formatBeijingDateTime(pool.startsAt)}/><Info label="到期时间" value={formatBeijingDateTime(pool.endsAt)}/><Info label="成员" value={`${members.length}/${pool.memberLimit}`}/></div></section>
+      <section className="rounded-2xl border bg-card p-5"><h2 className="font-medium">成员列表</h2><div className="mt-4 overflow-x-auto"><table className="w-full min-w-[760px] text-left text-sm"><thead className="border-b text-xs text-muted-foreground"><tr>{['用户','API Key','状态','个人额度','已使用','剩余','操作'].map(label=><th key={label} className="pb-3 font-normal">{label}</th>)}</tr></thead><tbody>{members.map(member=><MemberRow key={member.id} poolId={pool.id} member={member} refresh={refresh}/>)}</tbody></table></div></section>
+      <div className="grid gap-6 lg:grid-cols-2"><section className="rounded-2xl border bg-card p-5"><h2 className="font-medium">Codex 执行资源</h2>{pool.status==='waiting_resource'?<div className="mt-5"><AccountSelect value={selectedAccount} setValue={setSelectedAccount} accounts={accounts.data?.accounts??[]}/><div className="mt-4 flex gap-2"><Button variant="outline" disabled={!selectedAccount||bind.isPending} onClick={()=>bind.mutate()}>选择账号</Button><Button disabled={(!pool.pendingAccountId&&!selectedAccount)||activate.isPending} onClick={()=>activate.mutate()}><PackageCheck/>激活小号池</Button></div></div>:<><div className="mt-5 grid grid-cols-2 gap-4"><Info label="绑定账号" value={pool.accountLabel??'未绑定'}/><Info label="健康状态" value={pool.accountStatus??'—'}/><Info label="官方剩余额度" value={pool.accountQuotaRemainingPercent==null?'—':`${pool.accountQuotaRemainingPercent}%`}/><Info label="重置时间" value={formatBeijingDateTime(pool.accountQuotaResetAt)}/></div>{['active','paused'].includes(pool.status)&&<div className="mt-5 border-t pt-5"><AccountSelect value={selectedAccount} setValue={setSelectedAccount} accounts={accounts.data?.accounts??[]}/><Button className="mt-3" variant="outline" disabled={!selectedAccount||operation.isPending} onClick={()=>run('change-account',Number(selectedAccount))}><RefreshCw/>确认换绑</Button></div>}</>}</section><section className="rounded-2xl border bg-card p-5"><h2 className="font-medium">额度信息</h2><div className="mt-5 grid grid-cols-2 gap-4"><Info label="小号池总额度" value={quota(pool.allocationUnits)}/><Info label="已使用" value={quota(pool.usedUnits)}/><Info label="已预留" value={quota(pool.reservedUnits)}/><Info label="剩余" value={quota(remaining)}/></div></section></div>
+    </div>}
+  </div>
+}
+
+function AccountSelect({value,setValue,accounts}:{value:string;setValue:(value:string)=>void;accounts:Account[]}) { return <div><Label htmlFor="resource-account">拼单专用 Codex 账号</Label><select id="resource-account" className="mt-2 h-10 w-full rounded-lg border bg-background px-3" value={value} onChange={event=>setValue(event.target.value)}><option value="">请选择健康且空闲的账号</option>{accounts.map(account=><option key={account.id} value={account.id}>{account.label} · 剩余 {account.quotaRemainingPercent??'—'}%</option>)}</select></div> }
+function Info({label,value}:{label:string;value:string}) { return <div><div className="text-xs text-muted-foreground">{label}</div><div className="mt-1 text-sm font-medium">{value}</div></div> }
+function MemberRow({poolId,member,refresh}:{poolId:number;member:Member;refresh:()=>void}) { const[open,setOpen]=useState(false);const[delta,setDelta]=useState('');const[reason,setReason]=useState('');const mutation=useMutation({mutationFn:()=>apiFetch(`/api/admin/resources/subpools/${poolId}/members/${member.id}/quota-adjustments`,{method:'POST',body:JSON.stringify({deltaUnits:Number(delta),reason})}),onSuccess:()=>{toast.success('成员额度已调整');setOpen(false);refresh()}});const remaining=Math.max(0,Number(member.allocationUnits||0)-Number(member.usedUnits||0)-Number(member.reservedUnits||0));return <tr className="border-b last:border-0"><td className="py-3">{member.email}</td><td>{member.apiKeyName??'未关联'}</td><td>{member.status}</td><td>{quota(member.allocationUnits)}</td><td>{quota(member.usedUnits)}</td><td>{quota(remaining)}</td><td><Button size="sm" variant="outline" disabled={!member.memberQuotaId} onClick={()=>setOpen(true)}><Settings2/>调整</Button><Dialog open={open} onOpenChange={setOpen}><DialogPopup><DialogTitle>调整成员额度</DialogTitle><DialogDescription className="mt-1">额度变更将写入审计日志。</DialogDescription><div className="mt-5 space-y-4"><div><Label htmlFor={`delta-${member.id}`}>调整 units</Label><Input id={`delta-${member.id}`} className="mt-2" type="number" value={delta} onChange={event=>setDelta(event.target.value)}/></div><div><Label htmlFor={`reason-${member.id}`}>原因</Label><Input id={`reason-${member.id}`} className="mt-2" value={reason} onChange={event=>setReason(event.target.value)}/></div></div><div className="mt-6 flex justify-end gap-2"><DialogClose render={<Button variant="outline"/>}>取消</DialogClose><Button disabled={!Number(delta)||!reason.trim()||mutation.isPending} onClick={()=>mutation.mutate()}>确认调整</Button></div></DialogPopup></Dialog></td></tr> }

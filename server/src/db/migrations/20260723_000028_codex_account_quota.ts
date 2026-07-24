@@ -21,6 +21,10 @@ export function up(db: Db): void {
   }
 }
 
-export function down(_db: Db): void {
-  // SQLite cannot safely drop these compatibility columns on older deployments.
+export function down(db: Db): void {
+  const columns = db.prepare(`PRAGMA table_info(codex_oauth_accounts)`).all() as Array<{ name: string }>;
+  const has = (name: string) => columns.some((column) => column.name === name);
+  for (const name of ['plan_type', 'quota_synced_at', 'quota_reset_at', 'quota_remaining_percent', 'quota_used_percent']) {
+    if (has(name)) db.exec(`ALTER TABLE codex_oauth_accounts DROP COLUMN ${name}`);
+  }
 }

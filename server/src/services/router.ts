@@ -1,7 +1,8 @@
 import { getDb, getSetting, setSetting } from '../db/index.js';
 import { getProvider, hasProvider, resolveProvider } from '../providers/index.js';
 import { decrypt } from '../lib/crypto.js';
-import { getClientContext } from '../lib/client-context.js';
+import { getClientContext, setResourceDispatchId } from '../lib/client-context.js';
+import { selectCodexExecution, ResourceDispatchError } from './resource-scheduler.js';
 import {
   canMakeRequest,
   canUseTokens,
@@ -683,7 +684,7 @@ function selectKeyForModel(entry: ChainRow, estimatedTokens: number, skipKeys?: 
   const providerModelId = entry.upstream_model_id?.trim() || entry.model_id;
   const consumerKeyType = getClientContext().consumerApiKeyType;
 
-  if (consumerKeyType === 'codex_pool' && entry.platform !== 'openai-codex') {
+  if ((consumerKeyType === 'codex_pool' || consumerKeyType === 'resource_subpool') && entry.platform !== 'openai-codex') {
     diag?.push(`${label}: Codex pool API key cannot use ordinary providers`);
     return null;
   }
@@ -699,8 +700,51 @@ function selectKeyForModel(entry: ChainRow, estimatedTokens: number, skipKeys?: 
   // the provider still owns token decryption. upstream_model_id remains
   // available for ordinary providers but no longer pins the Codex alias.
   if (entry.platform === 'openai-codex') {
-    if (consumerKeyType && consumerKeyType !== 'codex_pool') {
+    if (consumerKeyType && consumerKeyType !== 'codex_pool' && consumerKeyType !== 'resource_subpool') {
       diag?.push(`${label}: consumer API key does not have Codex pool access`);
+      return null;
+    }
+
+    if (consumerKeyType === 'resource_subpool') {
+      const context = getClientContext();
+      if (context.resourceSubpoolId === null || context.resourceQuotaReservationId === null || !context.resourceRequestCorrelationId) {
+        diag?.push(`${label}: resource entitlement and quota reservation required`);
+        return null;
+      }
+      const skippedAccounts = new Set<number>();
+      for (const key of skipKeys ?? []) {
+        const match = /^openai-codex:.*:-(\d+)$/.exec(key);
+        if (match) skippedAccounts.add(Number(match[1]));
+      }
+      try {
+        const execution = selectCodexExecution(db, {
+          subpoolId: context.resourceSubpoolId,
+          reservationId: context.resourceQuotaReservationId,
+          correlationId: context.resourceRequestCorrelationId,
+          modelId: entry.model_id === 'codex' ? undefined : entry.model_id,
+          skipAccountIds: skippedAccounts,
+        });
+        setResourceDispatchId(execution.dispatchId);
+        return {
+          provider,
+          modelId: execution.modelId,
+          modelDbId: entry.model_db_id,
+          apiKey: `codex-account:${execution.accountId}`,
+          keyId: -execution.accountId,
+          platform: entry.platform,
+          displayName: entry.display_name,
+          rpdLimit: entry.rpd_limit,
+          tpdLimit: entry.tpd_limit,
+        };
+      } catch (error) {
+        const reason = error instanceof ResourceDispatchError ? error.code : 'resource_dispatch_failed';
+        diag?.push(`${label}: ${reason}`);
+        return null;
+      }
+    }
+
+    if (consumerKeyType !== 'codex_pool') {
+      diag?.push(`${label}: a scoped consumer API key is required`);
       return null;
     }
 
@@ -713,6 +757,7 @@ function selectKeyForModel(entry: ChainRow, estimatedTokens: number, skipKeys?: 
        AND b.model_id = am.model_id
        AND b.billing_enabled = 1
       WHERE a.enabled = 1
+        AND a.resource_scope = 'codex_pool'
         AND a.status IN ('healthy', 'unknown')
         AND (a.cooldown_until IS NULL OR a.cooldown_until <= datetime('now'))
         AND (
