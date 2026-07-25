@@ -15,6 +15,7 @@ import {
   listResourceUsageRecords,
 } from '../../services/resource-admin-operations.js';
 import { listResourceAdminAuditLogs } from '../../services/resource-admin-audit.js';
+import { adminDeleteResourceSubpool, adminDeleteRefundedResourceOrders } from '../../services/resource-admin-orders.js';
 
 describe('resource admin operations', () => {
   let db: Database.Database;
@@ -64,6 +65,7 @@ describe('resource admin operations', () => {
     expect(listResourceSubpools(db, 'active')).toHaveLength(1);
     const detail = getResourceSubpoolDetail(db, seeded.subpoolId)!;
     expect((detail.members as any[])).toHaveLength(4);
+    expect((detail.members as any[]).every((member) => Array.isArray(member.apiKeys))).toBe(true);
     expect((detail.pool as any).accountId).toBe(seeded.accountId);
     expect((detail.pool as any)).toMatchObject({ memberLimit: 4, productId: seeded.productId });
     expect(getResourceMemberQuota(db, seeded.subpoolId, seeded.memberId)).toMatchObject({ allocationUnits: 250_000, remainingUnits: 250_000 });
@@ -104,5 +106,47 @@ describe('resource admin operations', () => {
     const records = listResourceUsageRecords(db, { subpoolId: seeded.subpoolId, memberId: seeded.memberId }) as any[];
     expect(records).toHaveLength(1);
     expect(records[0]).toMatchObject({ requestId, memberId: seeded.memberId, totalTokens: 15, quotaUnits: 15 });
+  });
+
+  it('deletes only refunded orders and preserves wallet ledger history', () => {
+    const product = publishResourceProduct(db, createResourceProduct(db, {
+      productKey: 'delete-refund', name: 'Delete refunded order', priceMicro: 1_000_000,
+      memberLimit: 2, durationValue: 1, durationUnit: 'month', totalQuotaUnits: 100,
+      memberQuotaUnits: 50, groupTimeoutMinutes: 60,
+    }).id);
+    const userId = Number(db.prepare(`INSERT INTO users (email, password_hash) VALUES ('refund-delete@example.com', 'x')`).run().lastInsertRowid);
+    const refunded = createResourceOrder(db, userId, product.id);
+    const pending = createResourceOrder(db, userId, product.id);
+    db.prepare(`UPDATE resource_orders SET order_status = 'refunded', refunded_at = datetime('now') WHERE id = ?`).run(refunded.id);
+    db.prepare(`INSERT INTO wallet_transactions (user_id, type, delta_micro, balance_after_micro, resource_order_id)
+      VALUES (?, 'purchase_refund', 1000000, 1000000, ?)`).run(userId, refunded.id);
+
+    expect(() => adminDeleteRefundedResourceOrders(db, { orderIds: [pending.id], adminId })).toThrow(/only refunded/i);
+    expect(adminDeleteRefundedResourceOrders(db, { orderIds: [refunded.id], adminId })).toMatchObject({ deletedCount: 1 });
+    expect(db.prepare(`SELECT id FROM resource_orders WHERE id = ?`).get(refunded.id)).toBeUndefined();
+    expect(db.prepare(`SELECT type, resource_order_id orderId FROM wallet_transactions`).get()).toEqual({ type: 'purchase_refund', orderId: null });
+  });
+
+  it('deletes paused subpools but rejects running pools', () => {
+    const seeded = activePool();
+    const order = db.prepare(`SELECT id FROM resource_orders WHERE subpool_id = ? LIMIT 1`).get(seeded.subpoolId) as { id: number };
+    const quota = db.prepare(`SELECT q.id quotaId, p.id periodId FROM resource_member_quotas q
+      JOIN resource_subpool_quota_periods p ON p.id = q.subpool_period_id
+      WHERE q.member_id = ?`).get(seeded.memberId) as { quotaId: number; periodId: number };
+    const reservationId = Number(db.prepare(`INSERT INTO resource_quota_reservations
+      (request_correlation_id, subpool_id, period_id, member_quota_id, reserved_units, status, expires_at)
+      VALUES ('delete-pool-reservation', ?, ?, ?, 1, 'failed', datetime('now'))`).run(
+      seeded.subpoolId, quota.periodId, quota.quotaId,
+    ).lastInsertRowid);
+    db.prepare(`INSERT INTO resource_dispatches
+      (request_correlation_id, subpool_id, codex_account_id, quota_reservation_id, model_id, decision_reason, status)
+      VALUES ('delete-pool-reservation', ?, ?, ?, 'gpt-test', 'test', 'failed')`).run(
+      seeded.subpoolId, seeded.accountId, reservationId,
+    );
+    expect(() => adminDeleteResourceSubpool(db, { subpoolId: seeded.subpoolId, adminId })).toThrow(/running/i);
+    db.prepare(`UPDATE resource_subpools SET status = 'paused' WHERE id = ?`).run(seeded.subpoolId);
+    expect(adminDeleteResourceSubpool(db, { subpoolId: seeded.subpoolId, adminId })).toEqual({ subpoolId: seeded.subpoolId, deleted: true });
+    expect(db.prepare(`SELECT id FROM resource_subpools WHERE id = ?`).get(seeded.subpoolId)).toBeUndefined();
+    expect(db.prepare(`SELECT subpool_id subpoolId FROM resource_orders WHERE id = ?`).get(order.id)).toEqual({ subpoolId: null });
   });
 });

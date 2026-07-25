@@ -137,9 +137,10 @@ export function consumerQuota(
   const requestedModel = typeof req.body?.model === 'string'
     ? req.body.model.trim()
     : '';
-  const requestsCodexPool = requestedModel !== '' && (
-    requestedModel === 'codex'
-    || requestedModel === 'openai-codex/codex'
+  const explicitCodexAlias = requestedModel === 'codex'
+    || requestedModel === 'openai-codex/codex';
+  const knownCodexModel = requestedModel !== '' && (
+    explicitCodexAlias
     || Boolean(db.prepare(`
       SELECT 1
       FROM models
@@ -154,8 +155,23 @@ export function consumerQuota(
       LIMIT 1
     `).get(requestedModel))
   );
+  const knownOrdinaryModel = requestedModel !== '' && Boolean(db.prepare(`
+    SELECT 1
+    FROM models m
+    JOIN model_billing_rules b
+      ON b.platform = m.platform
+     AND b.model_id = m.model_id
+     AND b.billing_enabled = 1
+    WHERE m.platform <> 'openai-codex'
+      AND m.model_id = ?
+      AND m.enabled = 1
+    LIMIT 1
+  `).get(requestedModel));
 
-  if (key.keyType === 'universal' && requestsCodexPool) {
+  if (
+    key.keyType === 'universal'
+    && (explicitCodexAlias || (knownCodexModel && !knownOrdinaryModel))
+  ) {
     res.status(403).json({
       error: {
         message: 'This API key does not have access to Codex pool',
@@ -167,7 +183,7 @@ export function consumerQuota(
 
   if (
     key.keyType !== 'universal'
-    && !requestsCodexPool
+    && !knownCodexModel
   ) {
     res.status(403).json({
       error: {
@@ -258,7 +274,7 @@ export function consumerQuota(
   if (key.keyType === 'resource_subpool') {
     let resourceReservation: ReturnType<typeof reserveSubpoolQuota>;
     try {
-      resourceReservation = reserveSubpoolQuota(db, key.userId, key.id, estimateCodexQuotaUnits(req.body));
+      resourceReservation = reserveSubpoolQuota(db, key.userId, key.id, estimateCodexQuotaUnits(db, req.body));
       setResourceReservation(resourceReservation);
     } catch (error) {
       if (error instanceof ResourceQuotaError) {

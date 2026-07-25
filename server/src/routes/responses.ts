@@ -4,12 +4,13 @@ import type { Request, Response } from 'express';
 import { z } from 'zod';
 import type {
   ChatMessage,
+  ChatContentBlock,
   ChatToolCall,
   ChatToolDefinition,
   ChatToolChoice,
   Platform,
 } from '@freellmapi/shared/types.js';
-import { routeRequest, hasEnabledToolsModel, routingReserveTokens, type RouteResult } from '../services/router.js';
+import { routeRequest, hasEnabledToolsModel, routingReserveTokens, resolveModelGroupCandidates, type ChainRow, type RouteResult } from '../services/router.js';
 import { getUnifiedApiKey } from '../db/index.js';
 import { contentToString } from '../lib/content.js';
 import { repairToolArguments, toolSchemaMap } from '../lib/tool-args.js';
@@ -29,6 +30,8 @@ import { samplingParamSchemaFields, pickSamplingParams, type ResponseFormat } fr
 import { enforceJsonContent } from '../lib/structured-output.js';
 import { sanitizeProviderErrorMessage } from '../lib/error-redaction.js';
 import { inferQuotaPoolKey, type QuotaObservationContext } from '../services/provider-quota.js';
+import { getClientContext } from '../lib/client-context.js';
+import { getCodexConsumerModelDbId, normalizeCodexModelId } from '../services/model-listing.js';
 
 export const responsesRouter = Router();
 
@@ -162,6 +165,62 @@ function partsToString(content: unknown): string {
     .join('');
 }
 
+function responsesContentToChat(content: unknown): ChatMessage['content'] {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+
+  const hasImage = content.some((part) => {
+    if (!part || typeof part !== 'object') return false;
+    const value = part as {
+      type?: string;
+      image_url?: unknown;
+      image?: unknown;
+    };
+    if (value.type !== 'input_image' && value.type !== 'image_url' && value.type !== 'image') {
+      return false;
+    }
+    const rawImage = value.image_url ?? value.image;
+    return typeof rawImage === 'string'
+      || Boolean(rawImage && typeof rawImage === 'object' && 'url' in rawImage
+        && typeof (rawImage as { url?: unknown }).url === 'string');
+  });
+  if (!hasImage) return partsToString(content);
+
+  return content.flatMap((part): ChatContentBlock[] => {
+    if (typeof part === 'string') return [part];
+    if (!part || typeof part !== 'object') return [];
+    const value = part as {
+      type?: string;
+      text?: unknown;
+      content?: unknown;
+      image_url?: unknown;
+      image?: unknown;
+      detail?: unknown;
+    };
+    const rawImage = value.image_url ?? value.image;
+    const imageUrl = typeof rawImage === 'string'
+      ? rawImage
+      : rawImage && typeof rawImage === 'object' && 'url' in rawImage
+        ? (rawImage as { url?: unknown }).url
+        : undefined;
+    if (
+      (value.type === 'input_image' || value.type === 'image_url' || value.type === 'image')
+      && typeof imageUrl === 'string'
+    ) {
+      return [{
+        type: 'image_url',
+        image_url: {
+          url: imageUrl,
+          ...(typeof value.detail === 'string' ? { detail: value.detail } : {}),
+        },
+      }];
+    }
+    if (typeof value.text === 'string') return [{ type: 'text', text: value.text }];
+    if (typeof value.content === 'string') return [{ type: 'text', text: value.content }];
+    return [];
+  });
+}
+
 // Image input via the Responses API isn't carried through translation yet
 // (partsToString flattens to text). Detect it so we can hard-fail with a clear
 // pointer to /v1/chat/completions rather than silently dropping the image
@@ -229,7 +288,7 @@ export function toChatMessages(req: ResponsesRequest): ChatMessage[] {
       const m = item as { role: 'system' | 'developer' | 'user' | 'assistant'; content: unknown };
       // 'developer' is the Responses-era system role.
       const role = m.role === 'developer' ? 'system' : m.role;
-      messages.push({ role, content: partsToString(m.content) });
+      messages.push({ role, content: responsesContentToChat(m.content) });
     }
     // Unsupported history-only Responses items are intentionally ignored.
   }
@@ -274,43 +333,69 @@ export function buildResponseObject(opts: {
   toolCalls: ChatToolCall[];
   promptTokens: number;
   completionTokens: number;
+  createdAt?: number;
+  status?: 'in_progress' | 'completed';
+  outputItems?: any[];
 }) {
-  const output: any[] = [];
-  if (opts.text.length > 0) {
-    output.push({
-      type: 'message',
-      id: newId('msg'),
-      status: 'completed',
-      role: 'assistant',
-      content: [{ type: 'output_text', text: opts.text, annotations: [] }],
-    });
-  }
-  for (const tc of opts.toolCalls) {
-    output.push({
-      type: 'function_call',
-      id: newId('fc'),
-      call_id: tc.id,
-      name: tc.function.name,
-      arguments: tc.function.arguments,
-      status: 'completed',
-    });
+  const output: any[] = opts.outputItems ?? [];
+  if (!opts.outputItems) {
+    if (opts.text.length > 0) {
+      output.push({
+        type: 'message',
+        id: newId('msg'),
+        status: 'completed',
+        role: 'assistant',
+        content: [{ type: 'output_text', text: opts.text, annotations: [] }],
+      });
+    }
+    for (const tc of opts.toolCalls) {
+      output.push({
+        type: 'function_call',
+        id: newId('fc'),
+        call_id: tc.id,
+        name: tc.function.name,
+        arguments: tc.function.arguments,
+        status: 'completed',
+      });
+    }
   }
 
+  const status = opts.status ?? 'completed';
   return {
     id: opts.id,
     object: 'response',
-    created_at: nowUnix(),
-    status: 'completed',
+    created_at: opts.createdAt ?? nowUnix(),
+    status,
+    completed_at: status === 'completed' ? nowUnix() : null,
+    error: null,
+    incomplete_details: null,
+    instructions: null,
+    max_output_tokens: null,
     model: opts.model,
     output,
     output_text: opts.text,
-    usage: {
-      input_tokens: opts.promptTokens,
-      input_tokens_details: { cached_tokens: 0 },
-      output_tokens: opts.completionTokens,
-      output_tokens_details: { reasoning_tokens: 0 },
-      total_tokens: opts.promptTokens + opts.completionTokens,
-    },
+    parallel_tool_calls: true,
+    previous_response_id: null,
+    reasoning: null,
+    reasoning_effort: null,
+    store: false,
+    temperature: 1,
+    text: { format: { type: 'text' } },
+    tool_choice: 'auto',
+    tools: [],
+    top_p: 1,
+    truncation: 'disabled',
+    user: null,
+    metadata: {},
+    usage: status === 'completed'
+      ? {
+          input_tokens: opts.promptTokens,
+          input_tokens_details: { cached_tokens: 0 },
+          output_tokens: opts.completionTokens,
+          output_tokens_details: { reasoning_tokens: 0 },
+          total_tokens: opts.promptTokens + opts.completionTokens,
+        }
+      : null,
   };
 }
 
@@ -353,17 +438,6 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
 
   // Vision isn't carried through the Responses translation yet — fail clearly
   // instead of answering blind to a dropped image (#118, #125).
-  if (responsesInputHasImage(reqData)) {
-    res.status(422).json({
-      error: {
-        message: 'Image input is not yet supported on /v1/responses. Use /v1/chat/completions with an image_url content part instead.',
-        type: 'invalid_request_error',
-        code: 'no_vision_model',
-      },
-    });
-    return;
-  }
-
   const stream = reqData.stream ?? false;
   const messages = toChatMessages(reqData);
   const tools = toChatTools(reqData.tools);
@@ -414,7 +488,33 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
   // Optional client-managed session affinity (mirrors /chat/completions).
   const rawSessionId = req.headers['x-session-id'];
   const sessionIdHeader = Array.isArray(rawSessionId) ? rawSessionId[0] : rawSessionId;
-  const preferredModel = getStickyModel(messages, sessionIdHeader);
+  let preferredModel = getStickyModel(messages, sessionIdHeader);
+  let strictModelChain: ChainRow[] | undefined;
+  const consumerKeyType = getClientContext().consumerApiKeyType;
+  const rawRequestedModel = reqData.model?.trim();
+  const requestedModel = rawRequestedModel ? normalizeCodexModelId(rawRequestedModel) : rawRequestedModel;
+  if (
+    requestedModel
+    && requestedModel !== 'auto'
+    && (consumerKeyType === 'codex_pool' || consumerKeyType === 'resource_subpool')
+  ) {
+    const consumerKeyId = getClientContext().consumerApiKeyId;
+    const modelDbId = consumerKeyId === null
+      ? null
+      : getCodexConsumerModelDbId(consumerKeyType, consumerKeyId, requestedModel);
+    if (modelDbId === null) {
+      res.status(400).json({
+        error: {
+          message: `Codex model '${requestedModel}' is not available for this API key. Refresh /v1/models and select one of the returned models.`,
+          type: 'invalid_request_error',
+          code: 'model_not_available_for_key',
+        },
+      });
+      return;
+    }
+    preferredModel = modelDbId;
+    strictModelChain = resolveModelGroupCandidates([modelDbId]);
+  }
   const requestedModelLabel = reqData.model ?? 'auto';
 
   // Tool-bearing requests (the normal case for Codex/agent clients on this
@@ -435,6 +535,7 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
   }
 
   const responseId = newId('resp');
+  const responseCreatedAt = nowUnix();
   const state = newFallbackState();
   const attemptLog: AttemptRecord[] = [];
   let clientGone = false;
@@ -457,7 +558,7 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
     state,
     attemptLog,
     clientGone: () => clientGone,
-    route: () => routeRequest(estimatedTotal, state.skipKeys.size > 0 ? state.skipKeys : undefined, preferredModel, false, wantsTools, state.skipModels.size > 0 ? state.skipModels : undefined, undefined, completionOpts.response_format !== undefined),
+    route: () => routeRequest(estimatedTotal, state.skipKeys.size > 0 ? state.skipKeys : undefined, preferredModel, false, wantsTools, state.skipModels.size > 0 ? state.skipModels : undefined, strictModelChain, completionOpts.response_format !== undefined),
     dispatch: async (route, attempt) => {
       traceRouteEvent('Responses', {
         event: attempt === 0 ? 'start' : 'next',
@@ -474,6 +575,7 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
         // tool-call accumulator keyed by the provider's tool_call index
         const toolAcc = new Map<number, { outputIndex: number; itemId: string; callId: string; name: string; args: string }>();
         let totalOutputTokens = 0;
+        const completedOutputItems: any[] = [];
 
         // Inline-dialect hold window (#231): first text is held until it
         // either matches a tool-call dialect marker (held to the end and
@@ -496,10 +598,11 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
           res.setHeader('Connection', 'keep-alive');
           res.setHeader('X-Routed-Via', `${route.platform}/${route.modelId}`);
           setFallbackHeaders(res, attempt, attemptLog);
-          const skeleton = {
-            id: responseId, object: 'response', created_at: nowUnix(),
-            status: 'in_progress', model: route.modelId, output: [], output_text: '',
-          };
+          const skeleton = buildResponseObject({
+            id: responseId, model: route.modelId, text: '', toolCalls: [],
+            promptTokens: 0, completionTokens: 0, createdAt: responseCreatedAt,
+            status: 'in_progress', outputItems: [],
+          });
           sse('response.created', { response: skeleton });
           sse('response.in_progress', { response: skeleton });
           streamStarted = true;
@@ -583,9 +686,11 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
                 commit();
                 if (msgItemId !== null && msgText.length > 0) {
                   // close the text item (always output index 0) before starting a function_call item
+                  const completedMessage = { id: msgItemId, type: 'message', status: 'completed', role: 'assistant', content: [{ type: 'output_text', text: msgText, annotations: [] }] };
                   sse('response.output_text.done', { item_id: msgItemId, output_index: 0, content_index: 0, text: msgText });
                   sse('response.content_part.done', { item_id: msgItemId, output_index: 0, content_index: 0, part: { type: 'output_text', text: msgText, annotations: [] } });
-                  sse('response.output_item.done', { output_index: 0, item: { id: msgItemId, type: 'message', status: 'completed', role: 'assistant', content: [{ type: 'output_text', text: msgText, annotations: [] }] } });
+                  sse('response.output_item.done', { output_index: 0, item: completedMessage });
+                  completedOutputItems.push(completedMessage);
                   msgItemId = null;
                 }
                 outputIndex = toolAcc.size + (msgText.length > 0 ? 1 : 0);
@@ -683,9 +788,11 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
 
           // Finalize any open text item.
           if (msgItemId !== null) {
+            const completedMessage = { id: msgItemId, type: 'message', status: 'completed', role: 'assistant', content: [{ type: 'output_text', text: msgText, annotations: [] }] };
             sse('response.output_text.done', { item_id: msgItemId, output_index: 0, content_index: 0, text: msgText });
             sse('response.content_part.done', { item_id: msgItemId, output_index: 0, content_index: 0, part: { type: 'output_text', text: msgText, annotations: [] } });
-            sse('response.output_item.done', { output_index: 0, item: { id: msgItemId, type: 'message', status: 'completed', role: 'assistant', content: [{ type: 'output_text', text: msgText, annotations: [] }] } });
+            sse('response.output_item.done', { output_index: 0, item: completedMessage });
+            completedOutputItems.push(completedMessage);
           }
           // Finalize tool-call items. Arguments are repaired against the tool's
           // parameter schema at this point (after the full string accumulated):
@@ -696,14 +803,17 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
           const finalToolCalls: ChatToolCall[] = [];
           for (const acc of toolAcc.values()) {
             const repairedArgs = repairToolArguments(acc.args, toolSchemas.get(acc.name));
+            const completedCall = { id: acc.itemId, type: 'function_call', status: 'completed', call_id: acc.callId, name: acc.name, arguments: repairedArgs };
             sse('response.function_call_arguments.done', { item_id: acc.itemId, output_index: acc.outputIndex, arguments: repairedArgs });
-            sse('response.output_item.done', { output_index: acc.outputIndex, item: { id: acc.itemId, type: 'function_call', status: 'completed', call_id: acc.callId, name: acc.name, arguments: repairedArgs } });
+            sse('response.output_item.done', { output_index: acc.outputIndex, item: completedCall });
+            completedOutputItems.push(completedCall);
             finalToolCalls.push({ id: acc.callId, type: 'function', function: { name: acc.name, arguments: repairedArgs } });
           }
 
           const finalResponse = buildResponseObject({
             id: responseId, model: route.modelId, text: msgText,
             toolCalls: finalToolCalls, promptTokens: estimatedInputTokens, completionTokens: totalOutputTokens,
+            createdAt: responseCreatedAt, outputItems: completedOutputItems,
           });
           sse('response.completed', { response: finalResponse });
           res.end();
@@ -818,7 +928,7 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
       setFallbackHeaders(res, attempt, attemptLog);
       res.json(buildResponseObject({
         id: responseId, model: route.modelId, text, toolCalls,
-        promptTokens, completionTokens,
+        promptTokens, completionTokens, createdAt: responseCreatedAt,
       }));
 
       traceRouteEvent('Responses', {

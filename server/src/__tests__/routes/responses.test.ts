@@ -29,6 +29,13 @@ async function post(app: Express, path: string, body: any, key?: string) {
   return { status: res.status, text, contentType: res.headers.get('content-type') ?? '', headers: res.headers };
 }
 
+function parseSse(text: string): any[] {
+  return text.split('\n\n')
+    .map((block) => block.split('\n').find((line) => line.startsWith('data: '))?.slice(6))
+    .filter((data): data is string => Boolean(data))
+    .map((data) => JSON.parse(data));
+}
+
 describe('POST /v1/responses (#96)', () => {
   let app: Express;
   let key: string;
@@ -49,9 +56,19 @@ describe('POST /v1/responses (#96)', () => {
     expect((await post(app, '/v1/responses', { model: 'auto' }, key)).status).toBe(400);
   });
 
-  // #118: image input isn't carried through the Responses translation yet, so
-  // it must hard-fail clearly rather than silently answer blind to the image.
-  it('rejects image input with a clear 422 pointing at /v1/chat/completions', async () => {
+  it('forwards Responses image input to the selected provider', async () => {
+    let forwardedMessages: any[] = [];
+    mockRouteRequest.mockReturnValue(fakeRoute({
+      async chatCompletion(_key: string, messages: any[]) {
+        forwardedMessages = messages;
+        return {
+          id: 'image', object: 'chat.completion', created: 0, model: 'fake-model',
+          choices: [{ index: 0, message: { role: 'assistant', content: 'seen' }, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 3, completion_tokens: 1, total_tokens: 4 },
+        };
+      },
+      async *streamChatCompletion() { /* unused */ },
+    }));
     const { status, text } = await post(app, '/v1/responses', {
       input: [{
         role: 'user',
@@ -61,8 +78,12 @@ describe('POST /v1/responses (#96)', () => {
         ],
       }],
     }, key);
-    expect(status).toBe(422);
-    expect(JSON.parse(text).error.code).toBe('no_vision_model');
+    expect(status).toBe(200);
+    expect(JSON.parse(text).output_text).toBe('seen');
+    expect(forwardedMessages[0].content).toEqual([
+      { type: 'text', text: 'what is this?' },
+      { type: 'image_url', image_url: { url: 'data:image/png;base64,iVBORw0KGgo=' } },
+    ]);
   });
 
   // #103: the x-api-key header (Anthropic wire format) must authenticate here
@@ -123,9 +144,27 @@ describe('POST /v1/responses (#96)', () => {
     }
     expect(text).toContain('"delta":"Hel"');
     expect(text).toContain('"delta":"lo"');
-    // the terminal event carries the assembled text
-    const completed = text.split('event: response.completed')[1];
-    expect(completed).toContain('"output_text":"Hello"');
+    expect(text.endsWith('\n\n')).toBe(true);
+
+    const events = parseSse(text);
+    expect(events.map((event) => event.sequence_number)).toEqual(
+      events.map((_, index) => index),
+    );
+    const created = events.find((event) => event.type === 'response.created').response;
+    const itemDone = events.find((event) => event.type === 'response.output_item.done').item;
+    const completed = events.find((event) => event.type === 'response.completed').response;
+
+    expect(created).toMatchObject({
+      status: 'in_progress', error: null, incomplete_details: null,
+      instructions: null, output: [], usage: null,
+    });
+    expect(completed).toMatchObject({
+      status: 'completed', output_text: 'Hello', error: null,
+      incomplete_details: null, instructions: null,
+      text: { format: { type: 'text' } }, metadata: {},
+    });
+    expect(completed.created_at).toBe(created.created_at);
+    expect(completed.output[0]).toEqual(itemDone);
   });
 
   it('stream: tool-call deltas produce function_call events with assembled arguments', async () => {
@@ -142,6 +181,10 @@ describe('POST /v1/responses (#96)', () => {
     expect(text).toContain('event: response.function_call_arguments.delta');
     expect(text).toContain('event: response.function_call_arguments.done');
     expect(text).toContain('"arguments":"{\\"city\\":\\"SF\\"}"');
+    const events = parseSse(text);
+    const itemDone = events.find((event) => event.type === 'response.output_item.done').item;
+    const completed = events.find((event) => event.type === 'response.completed').response;
+    expect(completed.output[0]).toEqual(itemDone);
   });
 
   it('routes built-in Responses tools through tool-capable models', async () => {

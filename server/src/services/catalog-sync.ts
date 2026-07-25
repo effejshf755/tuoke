@@ -31,7 +31,14 @@ function ensureInternalChatModels(db: Db): void {
     INSERT OR IGNORE INTO models (
       platform, model_id, display_name, intelligence_rank, speed_rank,
       size_label, monthly_token_budget, enabled, supports_vision, supports_tools
-    ) VALUES ('openai-codex', 'codex', 'OpenAI Codex', 1, 1, '', '', 1, 0, 0)
+    ) VALUES ('openai-codex', 'codex', 'OpenAI Codex', 1, 1, '', '', 1, 0, 1)
+  `).run();
+
+  // `codex` is a virtual OAuth-pool alias. The selected real capability is
+  // tool-capable, so the alias must not be rejected before account selection.
+  db.prepare(`
+    UPDATE models SET supports_tools = 1
+    WHERE platform = 'openai-codex' AND model_id = 'codex'
   `).run();
 
   const row = db.prepare(`
@@ -45,6 +52,21 @@ function ensureInternalChatModels(db: Db): void {
     INSERT OR IGNORE INTO fallback_config (model_db_id, priority, enabled)
     VALUES (?, ?, 1)
   `).run(row.id, priority);
+
+  // OAuth model discovery is authoritative for Codex capabilities. These
+  // account-scoped models are not part of the public FreeLLMAPI catalog, but
+  // still need catalog rows so exact model requests can be routed.
+  db.prepare(`
+    INSERT OR IGNORE INTO models (
+      platform, model_id, display_name, intelligence_rank, speed_rank,
+      size_label, monthly_token_budget, enabled, supports_vision, supports_tools
+    )
+    SELECT DISTINCT
+      'openai-codex', am.model_id, am.model_id, 50, 50,
+      '', '', 1, 1, 1
+    FROM codex_oauth_account_models am
+    WHERE am.enabled = 1 AND am.model_id <> 'codex'
+  `).run();
 }
 
 /**
@@ -350,6 +372,7 @@ export function applyCatalog(db: Db, catalog: Catalog): NonNullable<SyncResult['
     const deleteModel = db.prepare('DELETE FROM models WHERE id = ?');
     for (const c of candidates) {
       if (isInternalChatModel(c.platform, c.model_id)) continue;
+      if (c.platform === 'openai-codex') continue;
       if (!hasProvider(c.platform as Platform)) continue; // not catalog-managed by this binary
       if (!inCatalog.has(`${c.platform}:${c.model_id}`)) {
         deleteFb.run(c.id);

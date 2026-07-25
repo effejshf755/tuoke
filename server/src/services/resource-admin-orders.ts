@@ -178,3 +178,53 @@ export function adminCancelResourceSubpool(db: Db, input: {
     return { subpoolId: input.subpoolId, orderCount: orders.length, refundedMicro };
   })();
 }
+
+export function adminDeleteRefundedResourceOrders(db: Db, input: { orderIds: number[]; adminId: number }) {
+  const orderIds = [...new Set(input.orderIds.map(Number))];
+  if (!orderIds.length || orderIds.some((id) => !Number.isSafeInteger(id) || id <= 0)) {
+    throw new Error('At least one valid resource order id is required');
+  }
+  return db.transaction(() => {
+    const placeholders = orderIds.map(() => '?').join(', ');
+    const orders = db.prepare(`SELECT id, order_no orderNo, order_status status
+      FROM resource_orders WHERE id IN (${placeholders}) ORDER BY id`).all(...orderIds) as Array<{
+        id: number; orderNo: string; status: string;
+      }>;
+    if (orders.length !== orderIds.length) throw new Error('Resource order was not found');
+    if (orders.some((order) => order.status !== 'refunded')) throw new Error('Only refunded resource orders can be deleted');
+    const member = db.prepare(`SELECT resource_order_id orderId FROM resource_subpool_members
+      WHERE resource_order_id IN (${placeholders}) LIMIT 1`).get(...orderIds) as { orderId: number } | undefined;
+    if (member) throw new Error(`Resource order ${member.orderId} is still linked to a subpool member`);
+
+    // Wallet rows remain as immutable financial history; their order FK becomes NULL.
+    const deleted = db.prepare(`DELETE FROM resource_orders WHERE id IN (${placeholders})
+      AND order_status = 'refunded'`).run(...orderIds);
+    if (deleted.changes !== orderIds.length) throw new Error('Resource order state changed during deletion');
+    recordResourceAdminAudit(db, {
+      adminUserId: input.adminId, action: 'resource_orders_deleted', targetType: 'resource_order',
+      targetId: orderIds.length === 1 ? orderIds[0] : null, details: { orders },
+    });
+    return { deletedCount: deleted.changes, orderIds };
+  })();
+}
+
+export function adminDeleteResourceSubpool(db: Db, input: { subpoolId: number; adminId: number }) {
+  return db.transaction(() => {
+    const pool = db.prepare(`SELECT id, name, status FROM resource_subpools WHERE id = ?`).get(input.subpoolId) as {
+      id: number; name: string; status: string;
+    } | undefined;
+    if (!pool) throw new Error('Resource subpool was not found');
+    if (pool.status === 'active') throw new Error('Running resource subpools cannot be deleted');
+    // Dispatches restrict reservation deletion, so remove them before member quotas cascade.
+    db.prepare(`DELETE FROM resource_dispatches WHERE subpool_id = ?`).run(pool.id);
+    db.prepare(`DELETE FROM resource_subpool_members WHERE subpool_id = ?`).run(pool.id);
+    db.prepare(`UPDATE resource_orders SET subpool_id = NULL WHERE subpool_id = ?`).run(pool.id);
+    const deleted = db.prepare(`DELETE FROM resource_subpools WHERE id = ? AND status <> 'active'`).run(pool.id);
+    if (deleted.changes !== 1) throw new Error('Resource subpool state changed during deletion');
+    recordResourceAdminAudit(db, {
+      adminUserId: input.adminId, action: 'resource_subpool_deleted', targetType: 'resource_subpool',
+      targetId: pool.id, details: { name: pool.name, previousStatus: pool.status },
+    });
+    return { subpoolId: pool.id, deleted: true };
+  })();
+}

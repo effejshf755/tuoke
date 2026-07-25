@@ -67,8 +67,21 @@ import type {
     return Math.ceil(JSON.stringify(messages).length / 4);
   }
 
+  export function codexCachedInputTokens(usage: any): number {
+    const value = usage?.input_tokens_details?.cached_tokens
+      ?? usage?.prompt_tokens_details?.cached_tokens
+      ?? usage?.cached_input_tokens
+      ?? 0;
+    return Number.isFinite(Number(value)) ? Math.max(0, Math.trunc(Number(value))) : 0;
+  }
+
+  type CodexInputContentPart =
+    | { type: 'input_text'; text: string }
+    | { type: 'output_text'; text: string }
+    | { type: 'input_image'; image_url: string; detail?: string };
+
   type CodexResponsesInputItem =
-    | { role: 'system' | 'user' | 'assistant'; content: string }
+    | { role: 'system' | 'user' | 'assistant'; content: string | CodexInputContentPart[] }
     | { type: 'function_call'; call_id: string; name: string; arguments: string }
     | { type: 'function_call_output'; call_id: string; output: string };
 
@@ -96,10 +109,35 @@ import type {
       }
 
       const toolCalls = message.role === 'assistant' ? (message.tool_calls ?? []) : [];
+      const textPartType = message.role === 'assistant' ? 'output_text' : 'input_text';
+      const responseContent = Array.isArray(message.content)
+        ? message.content.flatMap((part): CodexInputContentPart[] => {
+            if (typeof part === 'string') return part ? [{ type: textPartType, text: part }] : [];
+            if (!part || typeof part !== 'object') return [];
+            if (typeof part.text === 'string') return [{ type: textPartType, text: part.text }];
+            const rawImage = part.image_url ?? part.image;
+            const imageUrl = typeof rawImage === 'string'
+              ? rawImage
+              : rawImage && typeof rawImage === 'object' && 'url' in rawImage
+                ? (rawImage as { url?: unknown }).url
+                : undefined;
+            if ((part.type === 'image_url' || part.type === 'image') && typeof imageUrl === 'string') {
+              const detail = rawImage && typeof rawImage === 'object' && 'detail' in rawImage
+                ? (rawImage as { detail?: unknown }).detail
+                : undefined;
+              return [{
+                type: 'input_image',
+                image_url: imageUrl,
+                ...(typeof detail === 'string' ? { detail } : {}),
+              }];
+            }
+            return [];
+          })
+        : content;
       if (content || toolCalls.length === 0) {
         input.push({
           role: message.role,
-          content,
+          content: responseContent,
         });
       }
 
@@ -327,6 +365,7 @@ import type {
             modelId: _modelId,
             success: true,
             inputTokens: completion.usage.prompt_tokens,
+            cachedInputTokens: codexCachedInputTokens(usage),
             outputTokens: completion.usage.completion_tokens,
           });
           return completion;
@@ -400,6 +439,7 @@ import type {
         modelId: _modelId,
         success: true,
         inputTokens: finalUsage?.input_tokens ?? finalUsage?.prompt_tokens ?? estimatedInputTokens(_messages),
+        cachedInputTokens: codexCachedInputTokens(finalUsage),
         outputTokens: finalUsage?.output_tokens ?? finalUsage?.completion_tokens ?? Math.ceil(outputCharacters / 4),
       });
       recorded = true;

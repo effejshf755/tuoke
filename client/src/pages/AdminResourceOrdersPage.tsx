@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Eye, ReceiptText, RotateCcw } from 'lucide-react'
+import { Eye, ReceiptText, RotateCcw, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
 
@@ -27,12 +27,13 @@ const statuses = [
 ] as const
 const labels: Record<string, string> = Object.fromEntries(statuses)
 const money = (value: number) => `￥${(Number(value || 0) / 1_000_000).toFixed(2)}`
-const units = (value: number | null | undefined) => `${new Intl.NumberFormat('zh-CN').format(Number(value || 0))} units`
+const units = (value: number | null | undefined) => `${new Intl.NumberFormat('zh-CN').format(Number(value || 0))} Token`
 
 export function AdminResourceOrdersPage() {
   const [status, setStatus] = useState('all')
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [refundId, setRefundId] = useState<number | null>(null)
+  const [selected, setSelected] = useState<number[]>([])
   const queryClient = useQueryClient()
   const orders = useQuery<{ orders: Order[] }>({
     queryKey: ['admin-resource-orders', status],
@@ -53,22 +54,37 @@ export function AdminResourceOrdersPage() {
       queryClient.invalidateQueries({ queryKey: ['admin-resource-subpools'] })
     },
   })
+  const remove = useMutation({
+    mutationFn: (orderIds: number[]) => apiFetch<{ deletedCount: number }>('/api/admin/resources/orders', {
+      method: 'DELETE', body: JSON.stringify({ orderIds }),
+    }),
+    onSuccess: (result) => {
+      toast.success(`已删除 ${result.deletedCount} 个退款订单`)
+      setSelected([])
+      queryClient.invalidateQueries({ queryKey: ['admin-resource-orders'] })
+      queryClient.invalidateQueries({ queryKey: ['admin-resource-products'] })
+    },
+    onError: (error: Error) => toast.error(error.message),
+  })
+  const visibleRefunded = orders.data?.orders.filter(order => order.status === 'refunded').map(order => order.id) ?? []
+  const allRefundedSelected = visibleRefunded.length > 0 && visibleRefunded.every(id => selected.includes(id))
 
   return <div className="mx-auto w-full max-w-7xl">
     <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
       <div><h1 className="text-2xl font-semibold">资源订单</h1><p className="mt-1 text-sm text-muted-foreground">查询拼单订单、支付状态和钱包退款。</p></div>
-      <select value={status} onChange={event => setStatus(event.target.value)} className="h-9 rounded-lg border bg-background px-3 text-sm">
+      <div className="flex flex-wrap gap-2"><Button variant="destructive" disabled={!selected.length || remove.isPending} onClick={() => { if (window.confirm(`确定删除选中的 ${selected.length} 个退款订单？钱包流水会保留。`)) remove.mutate(selected) }}><Trash2 />删除选中</Button><select value={status} onChange={event => { setStatus(event.target.value); setSelected([]) }} className="h-9 rounded-lg border bg-background px-3 text-sm">
         {statuses.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-      </select>
+      </select></div>
     </div>
     <ResourceAdminTabs />
     <div className="mt-6">
       {orders.isLoading ? <TableSkeleton rows={8} /> : !orders.data?.orders.length ? <EmptyState icon={ReceiptText} title="暂无资源订单" /> :
         <div className="overflow-hidden rounded-2xl border bg-card">
-          <div className="hidden grid-cols-[1.5fr_1.2fr_.8fr_.8fr_1fr_auto] gap-4 border-b bg-muted/30 px-4 py-3 text-xs text-muted-foreground lg:grid">
-            <span>订单 / 商品</span><span>用户</span><span>状态</span><span>拼单</span><span>支付时间</span><span>操作</span>
+          <div className="hidden grid-cols-[auto_1.5fr_1.2fr_.8fr_.8fr_1fr_auto] gap-4 border-b bg-muted/30 px-4 py-3 text-xs text-muted-foreground lg:grid">
+            <input type="checkbox" aria-label="选择全部退款订单" checked={allRefundedSelected} disabled={!visibleRefunded.length} onChange={event => setSelected(event.target.checked ? visibleRefunded : [])} /><span>订单 / 商品</span><span>用户</span><span>状态</span><span>拼单</span><span>支付时间</span><span>操作</span>
           </div>
-          {orders.data.orders.map(order => <div key={order.id} className="grid gap-3 border-b p-4 last:border-0 lg:grid-cols-[1.5fr_1.2fr_.8fr_.8fr_1fr_auto] lg:items-center lg:gap-4">
+          {orders.data.orders.map(order => <div key={order.id} className="grid gap-3 border-b p-4 last:border-0 lg:grid-cols-[auto_1.5fr_1.2fr_.8fr_.8fr_1fr_auto] lg:items-center lg:gap-4">
+            <input type="checkbox" aria-label={`选择订单 ${order.orderNo}`} checked={selected.includes(order.id)} disabled={order.status !== 'refunded'} title={order.status === 'refunded' ? '选择退款订单' : '只有已退款订单可以删除'} onChange={event => setSelected(current => event.target.checked ? [...current, order.id] : current.filter(id => id !== order.id))} />
             <div><div className="font-medium">{order.productName}</div><code className="mt-1 block text-xs text-muted-foreground">{order.orderNo} · {money(order.priceMicro)}</code></div>
             <span className="break-all text-sm">{order.userEmail}</span>
             <Badge variant="outline">{labels[order.status] ?? order.status}</Badge>

@@ -56,14 +56,31 @@ codexOauthRouter.get('/billing', (_req, res) => {
       COALESCE(b.input_price_micro_per_million, 0) AS input_price,
       COALESCE(b.output_price_micro_per_million, 0) AS output_price,
       COALESCE(b.multiplier_milli, 1000) AS multiplier,
-      COALESCE(b.billing_enabled, 1) AS billing_enabled
+      COALESCE(b.billing_enabled, 1) AS billing_enabled,
+      COALESCE(usage.total_tokens, 0) AS total_tokens,
+      usage.last_used_at
     FROM codex_oauth_account_models am
     JOIN codex_oauth_accounts a ON a.id = am.account_id
     LEFT JOIN model_billing_rules b
       ON b.platform = 'openai-codex'
      AND b.model_id = am.model_id
+    LEFT JOIN (
+      SELECT model_id, SUM(total_tokens) AS total_tokens, MAX(created_at) AS last_used_at
+      FROM codex_usage_records
+      GROUP BY model_id
+    ) usage ON usage.model_id = am.model_id
+    WHERE a.resource_scope = 'codex_pool'
+      AND am.model_id <> 'codex-auto-review'
     GROUP BY am.model_id
-    ORDER BY am.model_id ASC
+    ORDER BY CASE am.model_id
+      WHEN 'gpt-5.6-sol' THEN 1
+      WHEN 'gpt-5.6-terra' THEN 2
+      WHEN 'gpt-5.6-luna' THEN 3
+      WHEN 'gpt-5.5' THEN 4
+      WHEN 'gpt-5.4-mini' THEN 5
+      WHEN 'gpt-5.4' THEN 6
+      ELSE 999
+    END, am.model_id ASC
   `).all() as Array<{
     model_id: string;
     account_count: number;
@@ -72,6 +89,8 @@ codexOauthRouter.get('/billing', (_req, res) => {
     output_price: number;
     multiplier: number;
     billing_enabled: number;
+    total_tokens: number;
+    last_used_at: string | null;
   }>;
 
   res.json({
@@ -83,6 +102,8 @@ codexOauthRouter.get('/billing', (_req, res) => {
       output_price_per_million: microToCurrency(row.output_price),
       multiplier: milliToMultiplier(row.multiplier),
       billing_enabled: Boolean(row.billing_enabled),
+      total_tokens: Number(row.total_tokens || 0),
+      last_used_at: row.last_used_at,
     })),
   });
 });

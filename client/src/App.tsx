@@ -46,7 +46,7 @@ import UserAnalyticsPage from '@/pages/UserAnalyticsPage'
 import UserCodexAccountsPage from '@/pages/UserCodexAccountsPage'
 import ApiDocsPage from '@/pages/ApiDocsPage'
 import AdminUsersPage from '@/pages/AdminUsersPage'
-import AdminBillingPage from '@/pages/AdminBillingPage'
+import AdminUserCodexPage from '@/pages/AdminUserCodexPage'
 import AdminModelsPage from '@/pages/AdminModelsPage'
 import AdminRechargePage from '@/pages/AdminRechargePage'
 import AdminDashboardPage from '@/pages/AdminDashboardPage'
@@ -81,7 +81,7 @@ const navItems = [
   { to: '/admin/users', labelKey: 'nav.users' },
   { to: '/admin/dashboard', labelKey: 'nav.dashboard' },
   { to: '/admin/models', labelKey: '模型管理' },
-  { to: '/admin/billing', labelKey: 'nav.billing' },
+  { to: '/admin/user-codex', labelKey: 'nav.userCodex' },
   { to: '/admin/recharge', labelKey: 'nav.recharge' },
   { to: '/admin/settings', labelKey: 'nav.settings' },
   { to: '/admin/codex/accounts', labelKey: 'Codex 账号池' },
@@ -404,7 +404,7 @@ function App() {
                 <Route path="/admin/users" element={<AdminUsersPage />} />
                 <Route path="/admin/dashboard" element={<AdminDashboardPage />} />
                 <Route path="/admin/models" element={<AdminModelsPage />} />
-                <Route path="/admin/billing" element={<AdminBillingPage />} />
+                <Route path="/admin/user-codex" element={<AdminUserCodexPage />} />
                 <Route path="/admin/recharge" element={<AdminRechargePage />} />
                 <Route path="/admin/settings" element={<AdminSettingsPage />} />
                 <Route path="/admin/codex" element={<Navigate to="/admin/codex/accounts" replace />} />

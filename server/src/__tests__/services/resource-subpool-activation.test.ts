@@ -108,16 +108,14 @@ describe('resource subpool activation', () => {
     expect((db.prepare(`SELECT COUNT(*) count FROM resource_subpool_members WHERE subpool_id = ? AND consumer_api_key_id IS NULL`).get(subpoolId) as { count: number }).count).toBe(4);
   });
 
-  it('rejects activation when the account cannot cover the product quota promise', () => {
+  it('allows an administrator to activate with a zero-quota account', () => {
     const { subpoolId } = createFormedSubpool();
-    const accountId = createAccount('insufficient-quota-account', 60);
+    const accountId = createAccount('zero-quota-account', 0);
     stageSubpoolCodexAccount(db, subpoolId, accountId);
 
-    expect(() => activateSubpool(db, subpoolId, adminId)).toThrow(/quota is insufficient/);
-    expect((db.prepare(`SELECT status FROM resource_subpools WHERE id = ?`).get(subpoolId) as { status: string }).status).toBe('waiting_resource');
-    expect((db.prepare(`SELECT COUNT(*) count FROM resource_subpool_bindings WHERE subpool_id = ?`).get(subpoolId) as { count: number }).count).toBe(0);
-    expect((db.prepare(`SELECT COUNT(*) count FROM resource_subpool_quota_periods WHERE subpool_id = ?`).get(subpoolId) as { count: number }).count).toBe(0);
-    expect((db.prepare(`SELECT COUNT(*) count FROM resource_member_quotas q JOIN resource_subpool_quota_periods p ON p.id = q.subpool_period_id WHERE p.subpool_id = ?`).get(subpoolId) as { count: number }).count).toBe(0);
+    expect(activateSubpool(db, subpoolId, adminId).status).toBe('active');
+    expect((db.prepare(`SELECT COUNT(*) count FROM resource_subpool_bindings WHERE subpool_id = ?`).get(subpoolId) as { count: number }).count).toBe(1);
+    expect((db.prepare(`SELECT COUNT(*) count FROM resource_subpool_quota_periods WHERE subpool_id = ?`).get(subpoolId) as { count: number }).count).toBe(1);
   });
 
   it('rejects activation when the member count is below the product limit and rolls back', () => {

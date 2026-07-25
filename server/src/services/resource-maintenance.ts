@@ -6,7 +6,6 @@ import { releaseSubpoolQuota } from './resource-quota.js';
 import { raiseResourceAlert } from './resource-alerts.js';
 
 const RESOURCE_MAINTENANCE_INTERVAL_MS = 60_000;
-const OFFICIAL_QUOTA_FULL_SCALE_UNITS = 1_000_000;
 
 export interface ResourceMaintenanceResult {
   releasedReservations: number;
@@ -31,10 +30,12 @@ export function resetDueResourceQuotaPeriods(db: Db): number {
     JOIN resource_subpools s ON s.id = p.subpool_id
     JOIN resource_subpool_bindings b ON b.subpool_id = s.id AND b.status = 'active'
     JOIN codex_oauth_accounts a ON a.id = b.codex_account_id
+    JOIN resource_quota_policy policy ON policy.id = 1
     WHERE p.status = 'active' AND p.resets_at IS NOT NULL
       AND datetime(p.resets_at) <= datetime('now')
       AND s.status = 'active' AND s.mode = 'dedicated'
       AND a.enabled = 1 AND a.status = 'healthy'
+      AND (a.quota_remaining_percent IS NULL OR a.quota_remaining_percent > policy.official_quota_floor_percent)
       AND a.quota_reset_at IS NOT NULL AND datetime(a.quota_reset_at) > datetime('now')
     ORDER BY p.id`).all() as Array<{ id: number }>;
 
@@ -50,21 +51,18 @@ export function resetDueResourceQuotaPeriods(db: Db): number {
         JOIN resource_subpools s ON s.id = p.subpool_id
         JOIN resource_subpool_bindings b ON b.subpool_id = s.id AND b.status = 'active'
         JOIN codex_oauth_accounts a ON a.id = b.codex_account_id
+        JOIN resource_quota_policy policy ON policy.id = 1
         WHERE p.id = ? AND p.status = 'active' AND datetime(p.resets_at) <= datetime('now')
           AND s.status = 'active' AND s.mode = 'dedicated'
           AND a.enabled = 1 AND a.status = 'healthy'
+          AND (a.quota_remaining_percent IS NULL OR a.quota_remaining_percent > policy.official_quota_floor_percent)
           AND a.quota_reset_at IS NOT NULL AND datetime(a.quota_reset_at) > datetime('now')`).get(candidate.id) as {
             periodId: number; subpoolId: number; productId: number; accountId: number;
             totalQuotaUnits: number; memberQuotaUnits: number; meterVersion: string;
             remainingPercent: number | null; nextResetAt: string;
           } | undefined;
-      if (!row || !row.totalQuotaUnits || !row.memberQuotaUnits || !row.meterVersion
-        || row.remainingPercent === null || !Number.isFinite(row.remainingPercent)) return false;
-      const availableUnits = Math.floor(
-        Math.max(0, Math.min(100, row.remainingPercent)) * (OFFICIAL_QUOTA_FULL_SCALE_UNITS / 100),
-      );
-      if (availableUnits < row.totalQuotaUnits) return false;
-
+        if (!row || !row.totalQuotaUnits || !row.memberQuotaUnits || !row.meterVersion
+          || (row.remainingPercent !== null && !Number.isFinite(row.remainingPercent))) return false;
       const reservations = db.prepare(`SELECT id FROM resource_quota_reservations
         WHERE period_id = ? AND status = 'reserved'`).all(row.periodId) as Array<{ id: number }>;
       for (const reservation of reservations) releaseSubpoolQuota(db, reservation.id);

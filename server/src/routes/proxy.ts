@@ -24,9 +24,9 @@ import { enforceJsonContent } from '../lib/structured-output.js';
 import type { Platform } from '@freellmapi/shared/types.js';
 import { inferQuotaPoolKey, type QuotaObservationContext } from '../services/provider-quota.js';
 import { isUnifyEnabled, getModelGroups, resolveRequestedIdToMembers } from '../services/model-groups.js';
-import { buildModelListing, filterModelListingForConsumer } from '../services/model-listing.js';
+import { buildModelListing, filterModelListingForCodexConsumer, filterModelListingForConsumer, getCodexConsumerModelDbId } from '../services/model-listing.js';
 import { validateConsumerApiKey } from '../services/consumer-api-keys.js';
-import { setConsumerIdentity } from '../lib/client-context.js';
+import { getClientContext, setConsumerIdentity } from '../lib/client-context.js';
 
 export const proxyRouter = Router();
 
@@ -229,17 +229,20 @@ proxyRouter.get('/models', (req: Request, res: Response) => {
   // receives the same user-visible catalog policy.
   const consumerKey = validateConsumerApiKey(getDb(), token);
   const consumerRequest = consumerKey !== null;
-  const baseCatalog = consumerRequest
-    ? filterModelListingForConsumer(buildModelListing())
-    : buildModelListing();
+  const fullCatalog = buildModelListing();
+  // Codex consumer keys route through OAuth account pools, whose health is
+  // independent from ordinary provider API keys. Keep the generic health and
+  // billing filter for universal keys, then enforce the key-specific catalog
+  // boundary below.
+  const baseCatalog = consumerKey?.keyType === 'universal'
+    ? filterModelListingForConsumer(fullCatalog)
+    : consumerKey
+      ? filterModelListingForCodexConsumer(fullCatalog, consumerKey.keyType, consumerKey.id)
+    : fullCatalog;
   const catalog = consumerKey
     ? {
         ...baseCatalog,
-        models: baseCatalog.models.filter(model =>
-          consumerKey.keyType !== 'universal'
-            ? model.id === 'codex'
-            : model.id !== 'codex',
-        ),
+        models: baseCatalog.models,
       }
     : baseCatalog;
   const { models: allListed, autoContextWindow } = catalog;
@@ -717,7 +720,13 @@ proxyRouter.post('/completions', async (req: Request, res: Response) => {
   let preferredModel: number | undefined;
   let groupChain: ChainRow[] | undefined;
 
-  if (!isAutoModel(requestedModel) && requestedModel) {
+  const codexPin = resolveCodexConsumerPin(requestedModel, res);
+  if (codexPin === null) return;
+
+  if (codexPin) {
+    preferredModel = codexPin.modelDbId;
+    groupChain = codexPin.strictChain;
+  } else if (!isAutoModel(requestedModel) && requestedModel) {
     const db = getDb();
     const members = isUnifyEnabled() ? resolveRequestedIdToMembers(requestedModel, getModelGroups()) : null;
     if (members && members.length > 0) {
@@ -1408,7 +1417,13 @@ export async function chatCompletionHandler(req: Request, res: Response) {
   // successful provider without leaking stickiness across groups.
   let stickyStrategyKey: string | undefined = strategyKey;
 
-  if (isAutoModel(requestedModel)) {
+  const codexPin = resolveCodexConsumerPin(requestedModel, res);
+  if (codexPin === null) return;
+
+  if (codexPin) {
+    preferredModel = codexPin.modelDbId;
+    groupChain = codexPin.strictChain;
+  } else if (isAutoModel(requestedModel)) {
     preferredModel = getStickyModel(messages, sessionIdHeader, strategyKey);
   } else if (requestedModel) {
     const db = getDb();
@@ -1991,6 +2006,47 @@ export async function chatCompletionHandler(req: Request, res: Response) {
       res.status(exhaustion.status).json({ error: { message: exhaustion.message, type: exhaustion.type } });
     },
   });
+}
+
+interface CodexConsumerPin {
+  modelDbId: number;
+  strictChain: ChainRow[];
+}
+
+/**
+ * Resolve an explicit model for a scoped Codex consumer key. Returning null
+ * means an error response has already been sent; undefined means the request
+ * uses the ordinary/unified routing path.
+ */
+function resolveCodexConsumerPin(
+  requestedModel: string | undefined,
+  res: Response,
+): CodexConsumerPin | null | undefined {
+  const context = getClientContext();
+  const keyType = context.consumerApiKeyType;
+  if (
+    (keyType !== 'codex_pool' && keyType !== 'resource_subpool')
+    || context.consumerApiKeyId === null
+    || !requestedModel
+    || isAutoModel(requestedModel)
+  ) {
+    return undefined;
+  }
+
+  const modelDbId = getCodexConsumerModelDbId(keyType, context.consumerApiKeyId, requestedModel);
+  const strictChain = modelDbId === null ? [] : resolveModelGroupCandidates([modelDbId]);
+  if (modelDbId === null || strictChain.length === 0) {
+    res.status(400).json({
+      error: {
+        message: `Codex model '${requestedModel}' is not available for this API key. Refresh /v1/models and select one of the returned models.`,
+        type: 'invalid_request_error',
+        code: 'model_not_available_for_key',
+      },
+    });
+    return null;
+  }
+
+  return { modelDbId, strictChain };
 }
 
 proxyRouter.post('/chat/completions', chatCompletionHandler);

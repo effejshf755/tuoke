@@ -1,8 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatMessage } from '@freellmapi/shared/types.js';
-import { toCodexResponsesInput } from '../../providers/openai-codex.js';
+import { codexCachedInputTokens, toCodexResponsesInput } from '../../providers/openai-codex.js';
 
 describe('toCodexResponsesInput', () => {
+  it('reads cached input tokens from supported Codex usage shapes', () => {
+    expect(codexCachedInputTokens({ input_tokens_details: { cached_tokens: 120 } })).toBe(120);
+    expect(codexCachedInputTokens({ prompt_tokens_details: { cached_tokens: 80 } })).toBe(80);
+    expect(codexCachedInputTokens({ cached_input_tokens: 40 })).toBe(40);
+    expect(codexCachedInputTokens({})).toBe(0);
+  });
   it('never forwards null message content', () => {
     const messages: ChatMessage[] = [
       { role: 'user', content: 'hello' },
@@ -56,13 +62,23 @@ describe('toCodexResponsesInput', () => {
     }];
 
     expect(toCodexResponsesInput(messages)).toEqual([
-      { role: 'assistant', content: 'working' },
+      { role: 'assistant', content: [{ type: 'output_text', text: 'working' }] },
       {
         type: 'function_call',
         call_id: 'call_2',
         name: 'finish',
         arguments: '{}',
       },
+    ]);
+  });
+
+  it('uses output_text for array-form assistant history', () => {
+    expect(toCodexResponsesInput([
+      { role: 'user', content: [{ type: 'text', text: 'question' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'answer' }] },
+    ])).toEqual([
+      { role: 'user', content: [{ type: 'input_text', text: 'question' }] },
+      { role: 'assistant', content: [{ type: 'output_text', text: 'answer' }] },
     ]);
   });
 });

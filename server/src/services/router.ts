@@ -766,12 +766,13 @@ function selectKeyForModel(entry: ChainRow, estimatedTokens: number, skipKeys?: 
           OR (a.quota_reset_at IS NOT NULL AND datetime(a.quota_reset_at) <= datetime('now'))
         )
         AND am.enabled = 1
+        AND (? = 'codex' OR am.model_id = ?)
       ORDER BY
         CASE WHEN am.model_id LIKE 'gpt-%' THEN 0 ELSE 1 END,
         COALESCE(a.last_used_at, '1970-01-01') ASC,
         a.id ASC,
         am.model_id ASC
-    `).all() as Array<{ account_id: number; model_id: string }>;
+    `).all(entry.model_id, entry.model_id) as Array<{ account_id: number; model_id: string }>;
 
     if (capabilities.length === 0) {
       diag?.push(`${label}: no enabled codex oauth account with a discovered model`);

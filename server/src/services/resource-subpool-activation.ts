@@ -114,28 +114,19 @@ export function activateSubpool(
       || member.orderProductId !== pool.productId
       || member.orderSubpoolId !== pool.id);
     if (invalidMember) throw new Error(`Subpool member ${invalidMember.memberId} does not have a valid grouped order`);
-    const account = db.prepare(`SELECT id, quota_remaining_percent remainingPercent, quota_reset_at resetAt
+    const account = db.prepare(`SELECT id, quota_reset_at resetAt
       FROM codex_oauth_accounts
       WHERE id = ? AND enabled = 1 AND status = 'healthy'
         AND resource_scope = 'resource_subpool'`).get(pool.pendingAccountId) as {
-        id: number; remainingPercent: number | null; resetAt: string | null;
+        id: number; resetAt: string | null;
       } | undefined;
     if (!account) throw new Error('Selected Codex OAuth account is not a healthy resource-subpool account');
-    if (account.remainingPercent === null || !Number.isFinite(account.remainingPercent)) throw new Error('Selected Codex OAuth account has no official quota snapshot');
     const conflict = db.prepare(`SELECT subpool_id subpoolId FROM resource_subpool_bindings
       WHERE codex_account_id = ? AND status IN ('active', 'migrating') AND subpool_id <> ? LIMIT 1`).get(account.id, pool.id) as { subpoolId: number } | undefined;
     if (conflict) throw new Error(`Codex OAuth account is already bound to subpool ${conflict.subpoolId}`);
     const existingBinding = db.prepare(`SELECT 1 FROM resource_subpool_bindings WHERE subpool_id = ? AND status IN ('active', 'migrating')`).get(pool.id);
     if (existingBinding) throw new Error('Subpool already has a dedicated account binding');
 
-    const availableResourceUnits = Math.floor(
-      Math.max(0, Math.min(100, account.remainingPercent)) * (OFFICIAL_QUOTA_FULL_SCALE_UNITS / 100),
-    );
-    if (availableResourceUnits < pool.totalQuotaUnits) {
-      throw new Error(
-        `Selected Codex OAuth account quota is insufficient: requires ${pool.totalQuotaUnits} units, available ${availableResourceUnits} units`,
-      );
-    }
     const allocationUnits = pool.totalQuotaUnits;
     const binding = db.prepare(`INSERT INTO resource_subpool_bindings (subpool_id, codex_account_id, status)
       VALUES (?, ?, 'active')`).run(pool.id, account.id);

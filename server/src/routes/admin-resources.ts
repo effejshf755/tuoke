@@ -14,14 +14,19 @@ import {
 import {
   createNextResourceProductVersion,
   createResourceProduct,
+  deleteUnpublishedResourceProduct,
   getResourceProduct,
   publishResourceProduct,
   unpublishResourceProduct,
+  updateResourceProduct,
   type CreateResourceProductInput,
 } from '../services/resource-products.js';
+import { getResourcePointsPolicy, updateResourcePointsPolicy } from '../services/resource-points.js';
 import {
   ADMIN_RESOURCE_ORDER_STATUSES,
   adminCancelResourceSubpool,
+  adminDeleteResourceSubpool,
+  adminDeleteRefundedResourceOrders,
   adminRefundResourceOrder,
   getAdminResourceOrderDetail,
   listAdminResourceOrders,
@@ -45,6 +50,25 @@ function adminId(req: Request): number {
 
 adminResourcesRouter.get('/products', (_req, res) => {
   res.json({ products: listResourceProductStats(getDb()) });
+});
+
+adminResourcesRouter.get('/points-policy', (_req, res) => {
+  res.json(getResourcePointsPolicy(getDb()));
+});
+
+adminResourcesRouter.put('/points-policy', (req, res) => {
+  try {
+    const updated = updateResourcePointsPolicy(getDb(), {
+      officialQuotaFloorPercent: Number(req.body?.officialQuotaFloorPercent),
+      defaultInputMultiplier: Number(req.body?.defaultInputMultiplier),
+      defaultCachedInputMultiplier: Number(req.body?.defaultCachedInputMultiplier),
+      defaultOutputMultiplier: Number(req.body?.defaultOutputMultiplier),
+      models: Array.isArray(req.body?.models) ? req.body.models : [],
+    });
+    recordResourceAdminAudit(getDb(), { adminUserId: adminId(req), action: 'resource_points_policy_updated',
+      targetType: 'resource_quota_policy', targetId: 1, details: req.body });
+    res.json(updated);
+  } catch (error) { productError(res, error); }
 });
 
 function productInput(body: any): CreateResourceProductInput {
@@ -102,10 +126,12 @@ adminResourcesRouter.post('/products', (req, res) => {
   try {
     const product = db.transaction(() => {
       const input = productInput(req.body);
-      const existing = db.prepare(`SELECT 1 FROM resource_products WHERE product_key = ? LIMIT 1`).get(input.productKey.trim());
-      if (existing) throw new Error('Product key already exists; create a new version instead');
-      const created = createResourceProduct(db, input);
-      recordResourceAdminAudit(db, { adminUserId: adminId(req), action: 'product_created', targetType: 'resource_product', targetId: created.id, details: { productKey: created.productKey, version: created.version } });
+      const existing = db.prepare(`SELECT id FROM resource_products
+        WHERE product_key = ? AND status <> 'draft' ORDER BY version DESC LIMIT 1`).get(input.productKey.trim()) as { id: number } | undefined;
+      const created = existing
+        ? createNextResourceProductVersion(db, existing.id, input)
+        : createResourceProduct(db, input);
+      recordResourceAdminAudit(db, { adminUserId: adminId(req), action: existing ? 'product_version_created' : 'product_created', targetType: 'resource_product', targetId: created.id, details: { productKey: created.productKey, version: created.version, sourceProductId: existing?.id ?? null } });
       return created;
     })();
     res.status(201).json({ product });
@@ -116,6 +142,18 @@ adminResourcesRouter.get('/products/:id', (req, res) => {
   const product = getResourceProduct(getDb(), Number(req.params.id));
   if (!product) { res.status(404).json({ error: { type: 'resource_product_not_found' } }); return; }
   res.json({ product });
+});
+
+adminResourcesRouter.put('/products/:id', (req, res) => {
+  const db = getDb();
+  try {
+    const product = db.transaction(() => {
+      const updated = updateResourceProduct(db, Number(req.params.id), productOverrides(req.body));
+      recordResourceAdminAudit(db, { adminUserId: adminId(req), action: 'product_updated', targetType: 'resource_product', targetId: updated.id, details: { productKey: updated.productKey, version: updated.version } });
+      return updated;
+    })();
+    res.json({ product });
+  } catch (error) { productError(res, error); }
 });
 
 adminResourcesRouter.post('/products/:id/publish', (req, res) => {
@@ -137,6 +175,18 @@ adminResourcesRouter.post('/products/:id/unpublish', (req, res) => {
       const unpublished = unpublishResourceProduct(db, Number(req.params.id));
       recordResourceAdminAudit(db, { adminUserId: adminId(req), action: 'product_unpublished', targetType: 'resource_product', targetId: unpublished.id, details: { productKey: unpublished.productKey, version: unpublished.version } });
       return unpublished;
+    })();
+    res.json({ product });
+  } catch (error) { productError(res, error); }
+});
+
+adminResourcesRouter.delete('/products/:id', (req, res) => {
+  const db = getDb();
+  try {
+    const product = db.transaction(() => {
+      const deleted = deleteUnpublishedResourceProduct(db, Number(req.params.id));
+      recordResourceAdminAudit(db, { adminUserId: adminId(req), action: 'product_deleted', targetType: 'resource_product', targetId: deleted.id, details: { productKey: deleted.productKey, version: deleted.version } });
+      return deleted;
     })();
     res.json({ product });
   } catch (error) { productError(res, error); }
@@ -183,6 +233,18 @@ adminResourcesRouter.post('/orders/:id/refund', (req, res) => {
   }
 });
 
+adminResourcesRouter.delete('/orders', (req, res) => {
+  try {
+    res.json(adminDeleteRefundedResourceOrders(getDb(), {
+      orderIds: Array.isArray(req.body?.orderIds) ? req.body.orderIds : [],
+      adminId: adminId(req),
+    }));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    res.status(/not found/i.test(message) ? 404 : 409).json({ error: { type: 'resource_order_delete_failed', message } });
+  }
+});
+
 adminResourcesRouter.get('/available-codex-accounts', (_req, res) => {
   res.json({ accounts: listAvailableCodexAccounts(getDb()) });
 });
@@ -222,6 +284,15 @@ adminResourcesRouter.get('/subpools/:id', (req, res) => {
 adminResourcesRouter.post('/subpools/:id/cancel-and-refund', (req, res) => {
   try {
     res.json(adminCancelResourceSubpool(getDb(), {
+      subpoolId: Number(req.params.id),
+      adminId: adminId(req),
+    }));
+  } catch (error) { subpoolOperationError(res, error); }
+});
+
+adminResourcesRouter.delete('/subpools/:id', (req, res) => {
+  try {
+    res.json(adminDeleteResourceSubpool(getDb(), {
       subpoolId: Number(req.params.id),
       adminId: adminId(req),
     }));

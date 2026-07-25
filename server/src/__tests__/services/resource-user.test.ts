@@ -7,6 +7,8 @@ import { groupPaidResourceOrder, markResourceOrderPaidForGrouping } from '../../
 import { activateSubpool, stageSubpoolCodexAccount } from '../../services/resource-subpool-activation.js';
 import {
   getPublishedResourceProduct,
+  getUserResourceSubscriptionDetail,
+  getUserResourceUsageAnalytics,
   listPublishedResourceProducts,
   listUserResourceOrders,
   listUserResourceSubscriptions,
@@ -90,6 +92,11 @@ describe('resource user queries', () => {
     expect(subscriptions[0]).toMatchObject({ subpoolId, totalQuotaUnits: 500_000, usedQuotaUnits: 0 });
     expect(JSON.stringify({ firstOrders, subscriptions })).not.toMatch(/private-account|accountId|oauth|secret/i);
     expect(listUserResourceSubscriptions(db, user('outsider@example.com'))).toEqual([]);
+    const detail = getUserResourceSubscriptionDetail(db, firstUserId, subpoolId)!;
+    expect(detail.members).toHaveLength(2);
+    expect(detail.members.some((member: any) => member.label === '我' && member.isCurrentUser)).toBe(true);
+    expect(JSON.stringify(detail)).not.toMatch(/private-account|first@example|second@example|accountId|oauth|secret/i);
+    expect(getUserResourceSubscriptionDetail(db, user('detail-outsider@example.com'), subpoolId)).toBeNull();
   });
 
   it('returns only the authenticated user usage and no administrator or OAuth fields', () => {
@@ -119,5 +126,9 @@ describe('resource user queries', () => {
     expect(listUserResourceUsage(db, secondUserId)).toEqual([
       expect.objectContaining({ modelId: 'gpt-user-1', consumedQuotaUnits: 11 }),
     ]);
+    const analytics = getUserResourceUsageAnalytics(db, firstUserId) as any;
+    expect(analytics.summary).toMatchObject({ totalRequests: 1, totalInputTokens: 10, totalOutputTokens: 5, consumedQuotaUnits: 10 });
+    expect(analytics.models).toEqual([expect.objectContaining({ modelId: 'gpt-user-0', requests: 1 })]);
+    expect(JSON.stringify(analytics)).not.toMatch(/gpt-user-1|second@example|private-account/i);
   });
 });

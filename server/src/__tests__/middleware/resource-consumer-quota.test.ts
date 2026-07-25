@@ -1,10 +1,10 @@
 import { EventEmitter } from 'events';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { getDb, initDb } from '../../db/index.js';
-import { clientContextMiddleware } from '../../lib/client-context.js';
+import { clientContextMiddleware, setConsumerIdentity } from '../../lib/client-context.js';
 import { consumerQuota } from '../../middleware/consumerQuota.js';
 import { createConsumerApiKey } from '../../services/consumer-api-keys.js';
-import { routePinnedModel } from '../../services/router.js';
+import { resolveModelGroupCandidates, routePinnedModel, routeRequest } from '../../services/router.js';
 
 class TestResponse extends EventEmitter {
   statusCode = 200;
@@ -101,6 +101,26 @@ describe('Codex resource consumer quota', () => {
     expect(callGate(resource.key, ordinaryModel.modelId).res.statusCode).toBe(403);
     expect(callGate(universal.key, ordinaryModel.modelId).continued).toBe(true);
 
+    // A model id can legitimately exist on both an ordinary provider and a
+    // Codex account. Universal keys must keep the ordinary route instead of
+    // being rejected merely because a Codex capability has the same id.
+    const collisionId = 'scope-collision-model';
+    db.prepare(`INSERT INTO models (
+      platform, model_id, display_name, intelligence_rank, speed_rank,
+      size_label, monthly_token_budget, enabled, supports_tools
+    ) VALUES ('groq', ?, ?, 50, 50, '', '', 1, 1)`).run(collisionId, collisionId);
+    db.prepare(`INSERT INTO models (
+      platform, model_id, display_name, intelligence_rank, speed_rank,
+      size_label, monthly_token_budget, enabled, supports_tools
+    ) VALUES ('openai-codex', ?, ?, 50, 50, '', '', 1, 1)`).run(collisionId, collisionId);
+    db.prepare(`INSERT INTO model_billing_rules
+      (platform, model_id, input_price_micro_per_million, output_price_micro_per_million, multiplier_milli, billing_enabled)
+      VALUES ('groq', ?, 0, 0, 1000, 1)`).run(collisionId);
+    db.prepare(`INSERT INTO model_billing_rules
+      (platform, model_id, input_price_micro_per_million, output_price_micro_per_million, multiplier_milli, billing_enabled)
+      VALUES ('openai-codex', ?, 0, 0, 1000, 1)`).run(collisionId);
+    expect(callGate(universal.key, collisionId).continued).toBe(true);
+
     const sharedAccountId = Number(db.prepare(`INSERT INTO codex_oauth_accounts (
       label, access_token_encrypted, access_token_iv, access_token_auth_tag,
       refresh_token_encrypted, refresh_token_iv, refresh_token_auth_tag, enabled, status, resource_scope
@@ -118,5 +138,49 @@ describe('Codex resource consumer quota', () => {
     const deniedResource = callGate(resource.key, model.modelId);
     expect(deniedResource.continued).toBe(false);
     expect(deniedResource.res.statusCode).toBe(403);
+  });
+
+  it('routes tool-bearing Codex alias requests to a real OAuth capability', () => {
+    const db = getDb();
+    const userId = Number(db.prepare(`INSERT INTO users (email, password_hash, balance_micro)
+      VALUES ('alias-tools@example.com', 'x', 100000000)`).run().lastInsertRowid);
+    const key = createConsumerApiKey(db, userId, 'Alias tools', null, 'codex_pool');
+    const capability = 'alias-tools-capability';
+    db.prepare(`INSERT INTO models (
+      platform, model_id, display_name, intelligence_rank, speed_rank,
+      size_label, monthly_token_budget, enabled, supports_tools
+    ) VALUES ('openai-codex', ?, ?, 50, 50, '', '', 1, 1)`).run(capability, capability);
+    db.prepare(`INSERT INTO model_billing_rules
+      (platform, model_id, input_price_micro_per_million, output_price_micro_per_million, multiplier_milli, billing_enabled)
+      VALUES ('openai-codex', ?, 0, 0, 1000, 1)`).run(capability);
+    const accountId = Number(db.prepare(`INSERT INTO codex_oauth_accounts (
+      label, access_token_encrypted, access_token_iv, access_token_auth_tag,
+      refresh_token_encrypted, refresh_token_iv, refresh_token_auth_tag,
+      enabled, status, resource_scope, quota_remaining_percent
+    ) VALUES ('alias-tools', 'x', 'x', 'x', 'x', 'x', 'x', 1, 'healthy', 'codex_pool', 100)`).run().lastInsertRowid);
+    db.prepare(`INSERT INTO codex_oauth_account_models (account_id, model_id, enabled)
+      VALUES (?, ?, 1)`).run(accountId, capability);
+
+    const alias = db.prepare(`SELECT id, supports_tools supportsTools FROM models
+      WHERE platform = 'openai-codex' AND model_id = 'codex'`).get() as { id: number; supportsTools: number };
+    let routed: ReturnType<typeof routeRequest> | null = null;
+    const req = { headers: {}, socket: { remoteAddress: '127.0.0.1' } } as any;
+    const res = new TestResponse() as any;
+    clientContextMiddleware(req, res, () => {
+      setConsumerIdentity(userId, key.record.id, 'codex_pool');
+      routed = routeRequest(
+        10,
+        undefined,
+        alias.id,
+        false,
+        true,
+        undefined,
+        resolveModelGroupCandidates([alias.id]),
+      );
+    });
+
+    expect(alias.supportsTools).toBe(1);
+    expect(routed?.platform).toBe('openai-codex');
+    expect(routed?.keyId).toBeLessThan(0);
   });
 });

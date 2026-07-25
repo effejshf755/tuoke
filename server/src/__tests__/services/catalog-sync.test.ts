@@ -222,6 +222,30 @@ describe('applyCatalog', () => {
     expect(restored.fallback_id).toBeTypeOf('number');
   });
 
+  it('backfills and preserves OAuth-discovered Codex models outside the public catalog', () => {
+    const accountId = Number(getDb().prepare(`
+      INSERT INTO codex_oauth_accounts (
+        label, access_token_encrypted, access_token_iv, access_token_auth_tag,
+        refresh_token_encrypted, refresh_token_iv, refresh_token_auth_tag,
+        enabled, status, resource_scope
+      ) VALUES ('catalog-codex@example.com', 'x', 'x', 'x', 'x', 'x', 'x', 1, 'healthy', 'codex_pool')
+    `).run().lastInsertRowid);
+    getDb().prepare(`
+      INSERT INTO codex_oauth_account_models (account_id, model_id, enabled)
+      VALUES (?, 'gpt-catalog-private', 1)
+    `).run(accountId);
+
+    applyCatalog(getDb(), catalogOf(existingAsCatalogModels()));
+    applyCatalog(getDb(), catalogOf(existingAsCatalogModels()));
+
+    const row = getDb().prepare(`
+      SELECT enabled, supports_tools
+      FROM models
+      WHERE platform = 'openai-codex' AND model_id = 'gpt-catalog-private'
+    `).get() as { enabled: number; supports_tools: number };
+    expect(row).toEqual({ enabled: 1, supports_tools: 1 });
+  });
+
   it('re-applies local model overrides after catalog metadata refreshes', () => {
     const models = existingAsCatalogModels().filter((m) => m.modelId !== 'override-model');
     models.push(baseModel({

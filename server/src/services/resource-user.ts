@@ -85,7 +85,14 @@ export function listUserResourceUsage(db: Db, userId: number, limit = 100) {
     req.model_id modelId,
     COALESCE(r.actual_units, r.reserved_units) consumedQuotaUnits,
     COALESCE(req.input_tokens, 0) inputTokens,
-    COALESCE(req.output_tokens, 0) outputTokens,
+    COALESCE(r.cached_input_tokens, 0) cachedInputTokens,
+    COALESCE(req.output_tokens, 0) outputTokens, req.status,
+    r.input_multiplier_micros / 1000000.0 inputMultiplier,
+    r.cached_input_multiplier_micros / 1000000.0 cachedInputMultiplier,
+    r.output_multiplier_micros / 1000000.0 outputMultiplier,
+    r.official_quota_percent_before officialQuotaPercentBefore,
+    r.official_quota_percent_after officialQuotaPercentAfter,
+    COALESCE(req.latency_ms, 0) latencyMs,
     COALESCE(req.input_tokens, 0) + COALESCE(req.output_tokens, 0) totalTokens,
     COALESCE(r.settled_at, r.created_at) createdAt
     FROM resource_quota_reservations r
@@ -94,4 +101,67 @@ export function listUserResourceUsage(db: Db, userId: number, limit = 100) {
     LEFT JOIN requests req ON req.id = r.request_id
     WHERE m.user_id = ? AND r.status = 'settled'
     ORDER BY r.id DESC LIMIT ?`).all(userId, safeLimit);
+}
+
+export function getUserResourceSubscriptionDetail(db: Db, userId: number, subpoolId: number) {
+  const subscription = db.prepare(`SELECT s.id subpoolId, s.status, s.starts_at startsAt, s.ends_at endsAt,
+    p.name productName, p.version productVersion, m.id memberId,
+    q.allocation_units totalQuotaUnits, q.used_units usedQuotaUnits, q.reserved_units reservedQuotaUnits,
+    MAX(0, q.allocation_units - q.used_units - q.reserved_units) remainingQuotaUnits,
+    period.resets_at quotaResetsAt, period.meter_version meterVersion,
+    a.plan_type accountPlanType, a.status accountStatus,
+    a.quota_remaining_percent accountQuotaRemainingPercent, a.quota_reset_at accountQuotaResetAt,
+    a.quota_synced_at accountQuotaSyncedAt
+    FROM resource_subpool_members m
+    JOIN resource_subpools s ON s.id = m.subpool_id
+    JOIN resource_products p ON p.id = s.product_id
+    JOIN resource_subpool_quota_periods period ON period.subpool_id = s.id AND period.status = 'active'
+    JOIN resource_member_quotas q ON q.subpool_period_id = period.id AND q.member_id = m.id
+    LEFT JOIN resource_subpool_bindings b ON b.subpool_id = s.id AND b.status = 'active'
+    LEFT JOIN codex_oauth_accounts a ON a.id = b.codex_account_id
+    WHERE m.user_id = ? AND m.subpool_id = ? AND m.status = 'active'`).get(userId, subpoolId) as Record<string, unknown> | undefined;
+  if (!subscription) return null;
+  const members = db.prepare(`SELECT m.id, m.user_id userId,
+    q.allocation_units allocationUnits, q.used_units usedUnits, q.reserved_units reservedUnits,
+    MAX(0, q.allocation_units - q.used_units - q.reserved_units) remainingUnits
+    FROM resource_subpool_members m
+    LEFT JOIN resource_subpool_quota_periods period ON period.subpool_id = m.subpool_id AND period.status = 'active'
+    LEFT JOIN resource_member_quotas q ON q.subpool_period_id = period.id AND q.member_id = m.id
+    WHERE m.subpool_id = ? AND m.status IN ('active', 'suspended') ORDER BY m.id`).all(subpoolId) as Array<Record<string, unknown> & { userId: number }>;
+  return { subscription, members: members.map((member, index) => ({
+    ...member, userId: undefined, label: member.userId === userId ? '我' : `成员 ${index + 1}`, isCurrentUser: member.userId === userId,
+  })) };
+}
+
+export function getUserResourceUsageAnalytics(db: Db, userId: number) {
+  const where = `FROM resource_quota_reservations r
+    JOIN resource_member_quotas q ON q.id = r.member_quota_id
+    JOIN resource_subpool_members m ON m.id = q.member_id
+    LEFT JOIN requests req ON req.id = r.request_id
+    WHERE m.user_id = ? AND r.status = 'settled'`;
+  const summary = db.prepare(`SELECT COUNT(*) totalRequests,
+    COALESCE(SUM(COALESCE(req.input_tokens, 0)), 0) totalInputTokens,
+    COALESCE(SUM(COALESCE(r.cached_input_tokens, 0)), 0) totalCachedInputTokens,
+    COALESCE(SUM(COALESCE(req.output_tokens, 0)), 0) totalOutputTokens,
+    COALESCE(SUM(COALESCE(r.actual_units, r.reserved_units)), 0) consumedQuotaUnits,
+    COALESCE(AVG(CASE WHEN req.latency_ms IS NOT NULL THEN req.latency_ms END), 0) avgLatencyMs ${where}`).get(userId);
+  const models = db.prepare(`SELECT COALESCE(req.model_id, 'auto') modelId, COUNT(*) requests,
+    COALESCE(SUM(COALESCE(req.input_tokens, 0)), 0) inputTokens,
+    COALESCE(SUM(COALESCE(r.cached_input_tokens, 0)), 0) cachedInputTokens,
+    COALESCE(SUM(COALESCE(req.output_tokens, 0)), 0) outputTokens,
+    COALESCE(SUM(COALESCE(r.actual_units, r.reserved_units)), 0) consumedQuotaUnits ${where}
+    GROUP BY COALESCE(req.model_id, 'auto') ORDER BY requests DESC, modelId LIMIT 50`).all(userId);
+  const timeline = db.prepare(`SELECT date(COALESCE(r.settled_at, r.created_at)) day, COUNT(*) requests,
+    COALESCE(SUM(COALESCE(req.input_tokens, 0) + COALESCE(req.output_tokens, 0)), 0) totalTokens ${where}
+    AND datetime(COALESCE(r.settled_at, r.created_at)) >= datetime('now', '-30 days')
+    GROUP BY date(COALESCE(r.settled_at, r.created_at)) ORDER BY day`).all(userId);
+  return { summary, models, timeline, recent: listUserResourceUsage(db, userId, 50) };
+}
+
+export function getUserSubscriptionAccountId(db: Db, userId: number, subpoolId: number): number | null {
+  const row = db.prepare(`SELECT b.codex_account_id accountId
+    FROM resource_subpool_members m
+    JOIN resource_subpool_bindings b ON b.subpool_id = m.subpool_id AND b.status = 'active'
+    WHERE m.user_id = ? AND m.subpool_id = ? AND m.status = 'active'`).get(userId, subpoolId) as { accountId: number } | undefined;
+  return row?.accountId ?? null;
 }

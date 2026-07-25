@@ -40,13 +40,41 @@ function getUserId(req: Request): number {
 
 userRouter.get('/codex-models', (_req, res) => {
   const rows = getDb().prepare(`
-    SELECT DISTINCT am.model_id
+    SELECT am.model_id,
+      MIN(b.input_price_micro_per_million) input_price,
+      MIN(b.output_price_micro_per_million) output_price,
+      MIN(b.multiplier_milli) multiplier
     FROM codex_oauth_account_models am
     JOIN codex_oauth_accounts a ON a.id = am.account_id
+    JOIN model_billing_rules b
+      ON b.platform = 'openai-codex'
+     AND b.model_id = am.model_id
+     AND b.billing_enabled = 1
     WHERE am.enabled = 1 AND a.enabled = 1
-    ORDER BY am.model_id ASC
-  `).all() as Array<{ model_id: string }>;
-  res.json({ models: rows.map(row => row.model_id) });
+      AND a.resource_scope = 'codex_pool'
+      AND am.model_id <> 'codex-auto-review'
+    GROUP BY am.model_id
+    ORDER BY CASE am.model_id
+      WHEN 'gpt-5.6-sol' THEN 1
+      WHEN 'gpt-5.6-terra' THEN 2
+      WHEN 'gpt-5.6-luna' THEN 3
+      WHEN 'gpt-5.5' THEN 4
+      WHEN 'gpt-5.4-mini' THEN 5
+      WHEN 'gpt-5.4' THEN 6
+      ELSE 999
+    END, am.model_id ASC
+  `).all() as Array<{
+    model_id: string;
+    input_price: number;
+    output_price: number;
+    multiplier: number;
+  }>;
+  res.json({ models: rows.map(row => ({
+    model_id: row.model_id,
+    input_price_per_million: Number((row.input_price / 1_000_000).toFixed(6)),
+    output_price_per_million: Number((row.output_price / 1_000_000).toFixed(6)),
+    multiplier: Number((row.multiplier / 1_000).toFixed(3)),
+  })) });
 });
 
 function getBearerToken(

@@ -12,6 +12,7 @@ export interface CodexUsageResult {
   modelId: string;
   success: boolean;
   inputTokens?: number;
+  cachedInputTokens?: number;
   outputTokens?: number;
   error?: string | null;
   authenticationFailure?: boolean;
@@ -20,6 +21,7 @@ export interface CodexUsageResult {
 
 interface CodexUsageTokens {
   inputTokens: number;
+  cachedInputTokens: number;
   outputTokens: number;
 }
 
@@ -38,6 +40,7 @@ export function recordCodexUsage(result: CodexUsageResult): number {
   const db = getDb();
   const context = getClientContext();
   const inputTokens = safeCount(result.inputTokens);
+  const cachedInputTokens = Math.min(inputTokens, safeCount(result.cachedInputTokens));
   const outputTokens = safeCount(result.outputTokens);
   const totalTokens = inputTokens + outputTokens;
   if (totalTokens > 0) markResourceUsageObserved();
@@ -59,12 +62,13 @@ export function recordCodexUsage(result: CodexUsageResult): number {
         consumer_user_id,
         api_key_id,
         input_tokens,
+        cached_input_tokens,
         output_tokens,
         total_tokens,
         success,
         error,
         billing_status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       result.accountDbId,
       account?.label ?? `Codex account #${result.accountDbId}`,
@@ -72,6 +76,7 @@ export function recordCodexUsage(result: CodexUsageResult): number {
       context.consumerUserId,
       context.consumerApiKeyId,
       inputTokens,
+      cachedInputTokens,
       outputTokens,
       totalTokens,
       result.success ? 1 : 0,
@@ -82,12 +87,13 @@ export function recordCodexUsage(result: CodexUsageResult): number {
     db.prepare(`
       INSERT INTO codex_usage_stats (
         account_id, model_id, api_key_id, request_count,
-        input_tokens, output_tokens, total_tokens,
+        input_tokens, cached_input_tokens, output_tokens, total_tokens,
         success_count, error_count, last_error, last_used_at
-      ) VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, datetime('now'))
+      ) VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
       ON CONFLICT(account_id, model_id, api_key_id) DO UPDATE SET
         request_count = request_count + 1,
         input_tokens = input_tokens + excluded.input_tokens,
+        cached_input_tokens = cached_input_tokens + excluded.cached_input_tokens,
         output_tokens = output_tokens + excluded.output_tokens,
         total_tokens = total_tokens + excluded.total_tokens,
         success_count = success_count + excluded.success_count,
@@ -100,6 +106,7 @@ export function recordCodexUsage(result: CodexUsageResult): number {
       result.modelId,
       aggregateApiKeyId,
       inputTokens,
+      cachedInputTokens,
       outputTokens,
       totalTokens,
       result.success ? 1 : 0,
@@ -177,6 +184,7 @@ export function getCodexUsageTokens(
   const row = db.prepare(`
     SELECT
       input_tokens AS inputTokens,
+      cached_input_tokens AS cachedInputTokens,
       output_tokens AS outputTokens
     FROM codex_usage_records
     WHERE id = ?

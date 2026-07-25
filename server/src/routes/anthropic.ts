@@ -9,7 +9,7 @@ import type {
   ChatToolChoice,
   ChatContentBlock,
 } from '@freellmapi/shared/types.js';
-import { routeRequest, routingReserveTokens, type RouteResult } from '../services/router.js';
+import { routeRequest, resolveModelGroupCandidates, routingReserveTokens, type ChainRow, type RouteResult } from '../services/router.js';
 import { getDb, getUnifiedApiKey } from '../db/index.js';
 import { contentToString } from '../lib/content.js';
 import { repairToolArguments, toolSchemaMap } from '../lib/tool-args.js';
@@ -20,8 +20,9 @@ import { extractApiToken, timingSafeStringEqual, getStickyModel, setStickyModel 
 import { runFallbackLoop, newFallbackState, recordUpstreamSuccess, type ExhaustionBody, setFallbackHeaders, type AttemptRecord } from '../lib/fallback-loop.js';
 import { applyTokenBudget, tokenBudgetMessage } from '../lib/guardrails.js';
 import { resolveAnthropicModel } from '../services/anthropic-map.js';
-import { buildModelListing, filterModelListingForConsumer } from '../services/model-listing.js';
+import { buildModelListing, filterModelListingForCodexConsumer, filterModelListingForConsumer, getCodexConsumerModelDbId } from '../services/model-listing.js';
 import { validateConsumerApiKey } from '../services/consumer-api-keys.js';
+import { getClientContext } from '../lib/client-context.js';
 
 // Anthropic-compatible Messages API (`POST /v1/messages`). This is a thin
 // translation layer over the SAME router/fallback/analytics machinery the
@@ -412,6 +413,32 @@ anthropicRouter.post('/messages', async (req: Request, res: Response) => {
   const rawSession = req.headers['x-claude-code-session-id'] ?? req.headers['x-session-id'];
   const sessionId = Array.isArray(rawSession) ? rawSession[0] : rawSession;
   let preferredModel = resolved.preferredModelDbId;
+  let strictModelChain: ChainRow[] | undefined;
+
+  const clientContext = getClientContext();
+  const consumerKeyType = clientContext.consumerApiKeyType;
+  if (
+    (consumerKeyType === 'codex_pool' || consumerKeyType === 'resource_subpool')
+    && clientContext.consumerApiKeyId !== null
+    && body.model
+  ) {
+    const modelDbId = getCodexConsumerModelDbId(
+      consumerKeyType,
+      clientContext.consumerApiKeyId,
+      body.model,
+    );
+    strictModelChain = modelDbId === null ? [] : resolveModelGroupCandidates([modelDbId]);
+    if (modelDbId === null || strictModelChain.length === 0) {
+      sendError(
+        res,
+        400,
+        'invalid_request_error',
+        `Codex model '${body.model}' is not available for this API key. Refresh /v1/models and select one of the returned models.`,
+      );
+      return;
+    }
+    preferredModel = modelDbId;
+  }
   if (preferredModel == null) preferredModel = getStickyModel(messages, sessionId);
 
   // Thin adapter over the shared fallback loop (lib/fallback-loop.ts): the
@@ -431,7 +458,7 @@ anthropicRouter.post('/messages', async (req: Request, res: Response) => {
     state,
     attemptLog,
     clientGone: () => clientGone,
-    route: () => routeRequest(estimatedTotal, state.skipKeys.size > 0 ? state.skipKeys : undefined, preferredModel, hasImage, wantsTools, state.skipModels.size > 0 ? state.skipModels : undefined),
+    route: () => routeRequest(estimatedTotal, state.skipKeys.size > 0 ? state.skipKeys : undefined, preferredModel, hasImage, wantsTools, state.skipModels.size > 0 ? state.skipModels : undefined, strictModelChain),
     dispatch: async (route, attempt) => {
       if (stream) {
         try {
@@ -816,13 +843,14 @@ anthropicRouter.get('/models', (req: Request, res: Response, next: NextFunction)
 
   const token = extractApiToken(req);
   const consumerKey = token ? validateConsumerApiKey(getDb(), token) : null;
-  const { models } = consumerKey
-    ? filterModelListingForConsumer(buildModelListing())
-    : buildModelListing();
+  const fullCatalog = buildModelListing();
+  const { models } = consumerKey?.keyType === 'universal'
+    ? filterModelListingForConsumer(fullCatalog)
+    : consumerKey
+      ? filterModelListingForCodexConsumer(fullCatalog, consumerKey.keyType, consumerKey.id)
+    : fullCatalog;
   const visibleModels = consumerKey
-    ? models.filter(model => consumerKey.keyType !== 'universal'
-      ? model.id === 'codex'
-      : model.id !== 'codex')
+    ? models
     : models;
   const data = [
     ...(consumerKey && consumerKey.keyType !== 'universal'

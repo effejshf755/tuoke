@@ -1,4 +1,5 @@
 import type { Request, Response, NextFunction } from 'express';
+import { getClientContext } from '../lib/client-context.js';
 
 // Per-IP fixed-window rate limiter for the public /v1 proxy (#35, item #6).
 //
@@ -36,13 +37,18 @@ export function createProxyRateLimiter(rpmLimit?: number) {
   const windows = new Map<string, WindowState>();
 
   return function proxyRateLimit(req: Request, res: Response, next: NextFunction): void {
-    if (limit === 0) {
+    // Read-only model discovery is polled aggressively by Codex clients and
+    // performs no upstream generation. It must not consume the request budget.
+    if (limit === 0 || req.method === 'GET' || req.method === 'HEAD') {
       next();
       return;
     }
 
     const now = Date.now();
-    const ip = req.ip ?? req.socket.remoteAddress ?? 'unknown';
+    const consumerKeyId = getClientContext().consumerApiKeyId;
+    const ip = consumerKeyId === null
+      ? `ip:${req.ip ?? req.socket.remoteAddress ?? 'unknown'}`
+      : `consumer-key:${consumerKeyId}`;
 
     let state = windows.get(ip);
     if (!state || now >= state.resetAt) {

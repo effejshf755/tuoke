@@ -15,9 +15,15 @@ export function listResourceProductStats(db: Db) {
     SUM(CASE WHEN o.order_status = 'grouped' THEN 1 ELSE 0 END) groupedOrderCount,
     SUM(CASE WHEN o.order_status = 'active' THEN 1 ELSE 0 END) activeOrderCount,
     COUNT(DISTINCT s.id) subpoolCount,
-    COUNT(DISTINCT CASE WHEN s.status = 'active' THEN s.id END) activeSubpoolCount
+    COUNT(DISTINCT CASE WHEN s.status = 'active' THEN s.id END) activeSubpoolCount,
+    COUNT(DISTINCT CASE WHEN o.order_status NOT IN ('completed', 'cancelled', 'expired', 'refunded', 'failed')
+      AND (o.subpool_id IS NULL OR order_pool.status = 'active') THEN o.id END) blockingOrderCount,
+    COUNT(DISTINCT CASE WHEN s.status = 'active' THEN s.id END) blockingSubpoolCount,
+    COUNT(DISTINCT CASE WHEN o.order_status IN ('pending_payment', 'paid_waiting_group', 'grouped') THEN o.id END) editingBlockedOrderCount,
+    COUNT(DISTINCT CASE WHEN s.status IN ('waiting_members', 'waiting_resource') THEN s.id END) editingBlockedSubpoolCount
     FROM resource_products p
     LEFT JOIN resource_orders o ON o.product_id = p.id
+    LEFT JOIN resource_subpools order_pool ON order_pool.id = o.subpool_id
     LEFT JOIN resource_subpools s ON s.product_id = p.id
     GROUP BY p.id ORDER BY p.id DESC`).all();
 }
@@ -72,8 +78,21 @@ export function getResourceSubpoolDetail(db: Db, subpoolId: number) {
     LEFT JOIN resource_orders o ON o.id = m.resource_order_id
     LEFT JOIN resource_subpool_quota_periods p ON p.subpool_id = m.subpool_id AND p.status = 'active'
     LEFT JOIN resource_member_quotas q ON q.member_id = m.id AND q.subpool_period_id = p.id
-    WHERE m.subpool_id = ? ORDER BY m.id`).all(subpoolId);
-  return { pool, members };
+    WHERE m.subpool_id = ? ORDER BY m.id`).all(subpoolId) as Array<Record<string, unknown> & { id: number }>;
+  const memberKeys = db.prepare(`SELECT mk.member_id memberId, k.id, k.name, k.key_prefix keyPrefix,
+    k.status, k.enabled, k.created_at createdAt
+    FROM resource_member_api_keys mk
+    JOIN consumer_api_keys k ON k.id = mk.consumer_api_key_id
+    JOIN resource_subpool_members m ON m.id = mk.member_id
+    WHERE m.subpool_id = ?
+    ORDER BY mk.member_id, k.id`).all(subpoolId) as Array<Record<string, unknown> & { memberId: number }>;
+  return {
+    pool,
+    members: members.map((member) => ({
+      ...member,
+      apiKeys: memberKeys.filter((key) => key.memberId === member.id),
+    })),
+  };
 }
 
 export function listAvailableCodexAccounts(db: Db) {

@@ -46,6 +46,10 @@ import * as resourceScopeIsolation from '../migrations/20260725_000037_resource_
 import * as codexAccountSoftDelete from '../migrations/20260725_000038_codex_account_soft_delete.js';
 import * as resourcePartialSettlement from '../migrations/20260725_000039_resource_partial_settlement.js';
 import * as resourceOperationalAlerts from '../migrations/20260725_000040_resource_operational_alerts.js';
+import * as codexAliasTools from '../migrations/20260725_000041_codex_alias_tools.js';
+import * as resourceMemberMultipleKeys from '../migrations/20260725_000042_resource_member_multiple_keys.js';
+import * as resourcePointsPolicy from '../migrations/20260725_000043_resource_points_policy.js';
+import * as resourceCachedPoints from '../migrations/20260725_000044_resource_cached_points.js';
 
 export interface MigrationModule {
   up(db: Db): void;
@@ -104,6 +108,10 @@ export const RESOURCE_SCOPE_ISOLATION_FILENAME = '20260725_000037_resource_scope
 export const CODEX_ACCOUNT_SOFT_DELETE_FILENAME = '20260725_000038_codex_account_soft_delete.ts';
 export const RESOURCE_PARTIAL_SETTLEMENT_FILENAME = '20260725_000039_resource_partial_settlement.ts';
 export const RESOURCE_OPERATIONAL_ALERTS_FILENAME = '20260725_000040_resource_operational_alerts.ts';
+export const CODEX_ALIAS_TOOLS_FILENAME = '20260725_000041_codex_alias_tools.ts';
+export const RESOURCE_MEMBER_MULTIPLE_KEYS_FILENAME = '20260725_000042_resource_member_multiple_keys.ts';
+export const RESOURCE_POINTS_POLICY_FILENAME = '20260725_000043_resource_points_policy.ts';
+export const RESOURCE_CACHED_POINTS_FILENAME = '20260725_000044_resource_cached_points.ts';
 
 export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: LEGACY_BASELINE_FILENAME, module: legacyBaseline },
@@ -153,4 +161,8 @@ export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: CODEX_ACCOUNT_SOFT_DELETE_FILENAME, module: codexAccountSoftDelete },
   { filename: RESOURCE_PARTIAL_SETTLEMENT_FILENAME, module: resourcePartialSettlement },
   { filename: RESOURCE_OPERATIONAL_ALERTS_FILENAME, module: resourceOperationalAlerts },
+  { filename: CODEX_ALIAS_TOOLS_FILENAME, module: codexAliasTools },
+  { filename: RESOURCE_MEMBER_MULTIPLE_KEYS_FILENAME, module: resourceMemberMultipleKeys },
+  { filename: RESOURCE_POINTS_POLICY_FILENAME, module: resourcePointsPolicy },
+  { filename: RESOURCE_CACHED_POINTS_FILENAME, module: resourceCachedPoints },
 ];

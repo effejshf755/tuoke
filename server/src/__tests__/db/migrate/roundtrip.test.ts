@@ -52,6 +52,10 @@ const CURRENT_MIGRATIONS_AFTER_KEYS = [
   '20260725_000038_codex_account_soft_delete.ts',
   '20260725_000039_resource_partial_settlement.ts',
   '20260725_000040_resource_operational_alerts.ts',
+  '20260725_000041_codex_alias_tools.ts',
+  '20260725_000042_resource_member_multiple_keys.ts',
+  '20260725_000043_resource_points_policy.ts',
+  '20260725_000044_resource_cached_points.ts',
 ];
 
 interface SchemaRow {

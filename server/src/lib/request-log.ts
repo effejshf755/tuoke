@@ -79,6 +79,7 @@ export function logRequest(
       : null;
     const hasProviderUsage = Boolean(codexTokens && (codexTokens.inputTokens > 0 || codexTokens.outputTokens > 0));
     const loggedInputTokens = hasProviderUsage ? codexTokens!.inputTokens : inputTokens;
+    const loggedCachedInputTokens = hasProviderUsage ? codexTokens!.cachedInputTokens : 0;
     const loggedOutputTokens = hasProviderUsage ? codexTokens!.outputTokens : outputTokens;
     const tx = db.transaction(() => {
       const insert = db.prepare(`
@@ -131,7 +132,8 @@ export function logRequest(
           db,
           client.resourceQuotaReservationId,
           requestId,
-          consumesQuota ? loggedInputTokens + loggedOutputTokens : null,
+          consumesQuota ? { inputTokens: loggedInputTokens, cachedInputTokens: loggedCachedInputTokens,
+            outputTokens: loggedOutputTokens } : null,
           settlementStatus,
         );
         if (client.resourceDispatchId !== null) {

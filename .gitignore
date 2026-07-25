@@ -20,5 +20,6 @@ update-hermes.sh
 monetization/
 tmp/
 /*.tar.gz
+/*.tgz
 
 client/public/media/*.mp4

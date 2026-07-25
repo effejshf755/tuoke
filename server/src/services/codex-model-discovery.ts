@@ -58,8 +58,15 @@ export function replaceCodexAccountModels(db: Db, accountId: number, modelIds: s
         billing_enabled
       ) VALUES ('openai-codex', ?, 0, 0, 1000, 1)
     `);
+    const createCatalogModel = db.prepare(`
+      INSERT OR IGNORE INTO models (
+        platform, model_id, display_name, intelligence_rank, speed_rank,
+        size_label, monthly_token_budget, enabled, supports_vision, supports_tools
+      ) VALUES ('openai-codex', ?, ?, 50, 50, '', '', 1, 1, 1)
+    `);
     for (const modelId of modelIds) {
       upsert.run(accountId, modelId);
+      createCatalogModel.run(modelId, modelId);
       createBillingRule.run(modelId);
     }
   })();
