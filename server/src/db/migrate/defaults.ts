@@ -50,6 +50,8 @@ import * as codexAliasTools from '../migrations/20260725_000041_codex_alias_tool
 import * as resourceMemberMultipleKeys from '../migrations/20260725_000042_resource_member_multiple_keys.js';
 import * as resourcePointsPolicy from '../migrations/20260725_000043_resource_points_policy.js';
 import * as resourceCachedPoints from '../migrations/20260725_000044_resource_cached_points.js';
+import * as resourceQuotaStages from '../migrations/20260726_000045_resource_quota_stages.js';
+import * as resourceQuotaPhases from '../migrations/20260726_000046_resource_quota_phases.js';
 
 export interface MigrationModule {
   up(db: Db): void;
@@ -112,6 +114,8 @@ export const CODEX_ALIAS_TOOLS_FILENAME = '20260725_000041_codex_alias_tools.ts'
 export const RESOURCE_MEMBER_MULTIPLE_KEYS_FILENAME = '20260725_000042_resource_member_multiple_keys.ts';
 export const RESOURCE_POINTS_POLICY_FILENAME = '20260725_000043_resource_points_policy.ts';
 export const RESOURCE_CACHED_POINTS_FILENAME = '20260725_000044_resource_cached_points.ts';
+export const RESOURCE_QUOTA_STAGES_FILENAME = '20260726_000045_resource_quota_stages.ts';
+export const RESOURCE_QUOTA_PHASES_FILENAME = '20260726_000046_resource_quota_phases.ts';
 
 export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: LEGACY_BASELINE_FILENAME, module: legacyBaseline },
@@ -165,4 +169,6 @@ export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: RESOURCE_MEMBER_MULTIPLE_KEYS_FILENAME, module: resourceMemberMultipleKeys },
   { filename: RESOURCE_POINTS_POLICY_FILENAME, module: resourcePointsPolicy },
   { filename: RESOURCE_CACHED_POINTS_FILENAME, module: resourceCachedPoints },
+  { filename: RESOURCE_QUOTA_STAGES_FILENAME, module: resourceQuotaStages },
+  { filename: RESOURCE_QUOTA_PHASES_FILENAME, module: resourceQuotaPhases },
 ];

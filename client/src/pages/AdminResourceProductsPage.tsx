@@ -64,11 +64,16 @@ const tabs = [
 
 const emptyForm: ProductForm = {
   productKey: 'codex-pro-x20', name: '', description: '', totalPriceYuan: '', memberLimit: '4',
-  durationValue: '1', durationUnit: 'month', totalPoints: '10000',
+  durationValue: '1', durationUnit: 'month', totalPoints: '100',
   groupTimeoutHours: '168', refundWindowMinutes: '60',
 }
 
 const PRODUCT_KEYS = ['codex-pro-x20', 'codex-pro-x5'] as const
+const PRODUCT_POINTS_WAN: Record<string, string> = {
+  'codex-pro-x20': '100',
+  'codex-pro-x5': '25',
+}
+const GROUP_OPTIONS = [5, 4, 3, 2] as const
 const statusLabel: Record<Product['status'], string> = {
   draft: '草稿', published: '已发布', unpublished: '已下架', archived: '已归档',
 }
@@ -101,7 +106,7 @@ function toForm(product?: Product | null): ProductForm {
     memberLimit: String(product.memberLimit),
     durationValue: String(product.durationValue),
     durationUnit: product.durationUnit,
-    totalPoints: String(product.totalQuotaUnits),
+    totalPoints: String(product.totalQuotaUnits / 10_000),
     groupTimeoutHours: String(product.groupTimeoutMinutes / 60),
     refundWindowMinutes: String(product.refundWindowMinutes),
   }
@@ -111,7 +116,7 @@ function payload(form: ProductForm, includeKey: boolean) {
   const memberLimit = Math.trunc(Number(form.memberLimit))
   const totalPriceMicro = Math.round(Number(form.totalPriceYuan) * 1_000_000)
   const priceMicro = Math.round(totalPriceMicro / memberLimit)
-  const totalQuotaUnits = Math.round(Number(form.totalPoints))
+  const totalQuotaUnits = Math.round(Number(form.totalPoints) * 10_000)
   const memberQuotaUnits = Math.floor(totalQuotaUnits / memberLimit)
   if (!form.name.trim() || (includeKey && !form.productKey.trim())) throw new Error('请填写商品名称和商品标识')
   if (!Number.isSafeInteger(memberLimit) || memberLimit < 2) throw new Error('拼单人数至少为 2 人')
@@ -153,6 +158,22 @@ function ProductEditor({ open, source, mode, onOpenChange, onSaved }: {
     onError: (error: Error) => toast.error(error.message),
   })
   const set = <K extends keyof ProductForm>(key: K, value: ProductForm[K]) => setForm(current => ({ ...current, [key]: value }))
+  const nameSuggestions = GROUP_OPTIONS.map(memberLimit => ({
+    memberLimit,
+    name: `${form.productKey} ${memberLimit}人组`,
+  }))
+  const changeProductKey = (productKey: string) => setForm(current => ({
+    ...current,
+    productKey,
+    totalPoints: PRODUCT_POINTS_WAN[productKey] ?? current.totalPoints,
+    name: !current.name.trim() || current.name.startsWith('codex-pro-')
+      ? `${productKey} ${current.memberLimit}人组`
+      : current.name,
+  }))
+  const changeName = (name: string) => {
+    const preset = nameSuggestions.find(option => option.name === name)
+    setForm(current => ({ ...current, name, ...(preset ? { memberLimit: String(preset.memberLimit) } : {}) }))
+  }
   const submit = (event: FormEvent) => {
     event.preventDefault()
     try { payload(form, mode === 'create'); save.mutate() }
@@ -166,13 +187,16 @@ function ProductEditor({ open, source, mode, onOpenChange, onSaved }: {
       <form className="mt-6 space-y-5" onSubmit={submit}>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="商品标识" hint="发布后通过新版本调整配置">
-            <select className="h-9 w-full rounded-lg border bg-background px-3 text-sm disabled:cursor-not-allowed disabled:opacity-50" value={form.productKey} disabled={hasSource} onChange={e => set('productKey', e.target.value)}>
+            <select className="h-9 w-full rounded-lg border bg-background px-3 text-sm disabled:cursor-not-allowed disabled:opacity-50" value={form.productKey} disabled={hasSource} onChange={e => changeProductKey(e.target.value)}>
               {!PRODUCT_KEYS.includes(form.productKey as typeof PRODUCT_KEYS[number]) && <option value={form.productKey}>{form.productKey}</option>}
               <option value="codex-pro-x20">codex-pro-x20</option>
               <option value="codex-pro-x5">codex-pro-x5</option>
             </select>
           </Field>
-          <Field label="商品名称"><Input value={form.name} onChange={e => set('name', e.target.value)} placeholder="Codex Pro20 四人月拼单" /></Field>
+          <Field label="商品名称" hint="可从二至五人组中选择，也可以手动输入">
+            <Input list="resource-product-name-options" value={form.name} onChange={e => changeName(e.target.value)} placeholder="选择预设名称或手动输入" />
+            <datalist id="resource-product-name-options">{nameSuggestions.map(option => <option key={option.memberLimit} value={option.name} />)}</datalist>
+          </Field>
         </div>
         <Field label="商品描述"><textarea className="min-h-20 w-full resize-y rounded-lg border bg-background px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30" value={form.description} onChange={e => set('description', e.target.value)} placeholder="面向用户展示的套餐说明" /></Field>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -182,8 +206,8 @@ function ProductEditor({ open, source, mode, onOpenChange, onSaved }: {
           <Field label="周期单位"><select className="h-9 w-full rounded-lg border bg-background px-3 text-sm" value={form.durationUnit} onChange={e => set('durationUnit', e.target.value as ProductForm['durationUnit'])}><option value="month">月</option><option value="day">天</option></select></Field>
         </div>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <Field label="商品总权益积分" hint="按拼单人数平均分配，例如 X20 可设置 10000 积分"><Input type="number" min="1" step="1" value={form.totalPoints} onChange={e => set('totalPoints', e.target.value)} /></Field>
-          <Field label="每位成员积分" hint="由商品总权益积分 ÷ 拼单人数自动计算"><Input value={Number.isFinite(Number(form.totalPoints)) ? units(Math.floor(Number(form.totalPoints) / Math.max(2, Number(form.memberLimit || 0)))) : '—'} disabled /></Field>
+          <Field label="商品总权益积分（万）" hint="以万积分为单位；X20 默认 100 万，X5 默认 25 万"><Input type="number" min="0.0001" step="0.0001" value={form.totalPoints} onChange={e => set('totalPoints', e.target.value)} /></Field>
+          <Field label="每位成员积分" hint="由商品总权益积分除以拼单人数自动计算"><Input value={Number.isFinite(Number(form.totalPoints)) ? units(Math.floor(Number(form.totalPoints) * 10_000 / Math.max(2, Number(form.memberLimit || 0)))) : '—'} disabled /></Field>
           <Field label="计量规则" hint="输入 Token × 输入倍率 + 输出 Token × 输出倍率"><Input value="权益积分（points-v1）" disabled /></Field>
         </div>
         <div className="grid gap-4 sm:grid-cols-2">

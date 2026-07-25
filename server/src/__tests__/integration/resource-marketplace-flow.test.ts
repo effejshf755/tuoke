@@ -82,9 +82,9 @@ describe('resource marketplace end-to-end flow', () => {
 
     stageSubpoolCodexAccount(db, subpoolId, accountId, adminId);
     const activation = activateSubpool(db, subpoolId, adminId);
-    expect(activation).toMatchObject({ subpoolId, accountId, allocationUnits: 1_000_000, status: 'active' });
+    expect(activation).toMatchObject({ subpoolId, accountId, allocationUnits: 200_000, status: 'active' });
     expect(activation.memberAllocations).toHaveLength(4);
-    expect(activation.memberAllocations.every((quota) => quota.allocationUnits === 250_000)).toBe(true);
+    expect(activation.memberAllocations.every((quota) => quota.allocationUnits === 50_000)).toBe(true);
     expect((db.prepare(`SELECT COUNT(*) count FROM resource_subpool_members
       WHERE subpool_id = ? AND status = 'active' AND consumer_api_key_id IS NOT NULL`).get(subpoolId) as { count: number }).count).toBe(4);
 
@@ -119,13 +119,13 @@ describe('resource marketplace end-to-end flow', () => {
       FROM resource_member_quotas q
       JOIN resource_subpool_members m ON m.id = q.member_id
       WHERE m.subpool_id = ? AND m.user_id = ?`).get(subpoolId, caller.userId);
-    expect(memberQuota).toEqual({ usedUnits: 20, reservedUnits: 0 });
+    expect(memberQuota).toEqual({ usedUnits: 1, reservedUnits: 0 });
     expect(db.prepare(`SELECT used_units usedUnits, reserved_units reservedUnits
       FROM resource_subpool_quota_periods WHERE id = ?`).get(activation.quotaPeriodId))
-      .toEqual({ usedUnits: 20, reservedUnits: 0 });
+      .toEqual({ usedUnits: 1, reservedUnits: 0 });
     expect(db.prepare(`SELECT status, actual_units actualUnits, request_id requestId
       FROM resource_quota_reservations WHERE subpool_id = ?`).get(subpoolId))
-      .toEqual({ status: 'settled', actualUnits: 20, requestId });
+      .toEqual({ status: 'settled', actualUnits: 1, requestId });
     expect((db.prepare(`SELECT COUNT(*) count FROM resource_quota_ledger
       WHERE subpool_id = ? AND request_id = ? AND type = 'settlement'`).get(subpoolId, requestId) as { count: number }).count).toBe(1);
     expect((db.prepare(`SELECT balance_micro balance FROM users WHERE id = ?`)
@@ -172,6 +172,6 @@ describe('resource marketplace end-to-end flow', () => {
     expect(db.prepare(`SELECT status FROM requests WHERE id = ?`).get(resumedRequestId)).toEqual({ status: 'success' });
     expect(db.prepare(`SELECT used_units usedUnits, reserved_units reservedUnits
       FROM resource_subpool_quota_periods WHERE id = ?`).get(activation.quotaPeriodId))
-      .toEqual({ usedUnits: 30, reservedUnits: 0 });
+      .toEqual({ usedUnits: 2, reservedUnits: 0 });
   });
 });

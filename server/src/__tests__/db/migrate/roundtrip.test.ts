@@ -56,6 +56,8 @@ const CURRENT_MIGRATIONS_AFTER_KEYS = [
   '20260725_000042_resource_member_multiple_keys.ts',
   '20260725_000043_resource_points_policy.ts',
   '20260725_000044_resource_cached_points.ts',
+  '20260726_000045_resource_quota_stages.ts',
+  '20260726_000046_resource_quota_phases.ts',
 ];
 
 interface SchemaRow {

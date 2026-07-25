@@ -45,9 +45,9 @@ describe('resource points policy', () => {
   }
 
   it('calculates separate input and output weights with ceiling', () => {
-    expect(calculateResourcePoints(1000, 500, 1_000_000, 2_000_000)).toBe(2000);
-    expect(calculateResourcePoints(1, 0, 1_500_000, 1_000_000)).toBe(2);
-    expect(calculateResourcePoints(1000, 500, 1_000_000, 2_000_000, 400, 250_000)).toBe(1700);
+    expect(calculateResourcePoints(1000, 500, 1_000_000, 2_000_000)).toBe(2);
+    expect(calculateResourcePoints(1, 0, 1_500_000, 1_000_000)).toBe(1);
+    expect(calculateResourcePoints(1000, 500, 1_000_000, 2_000_000, 400, 250_000)).toBe(2);
   });
 
   it('uses model-specific rules and snapshots them for settlement', () => {
@@ -75,7 +75,7 @@ describe('resource points policy', () => {
       cached_input_tokens cachedInputTokens, cached_input_multiplier_micros cachedInputMultiplier,
       output_multiplier_micros outputMultiplier FROM resource_quota_reservations WHERE id = ?`)
       .get(reservation.reservationId);
-    expect(settled).toEqual({ actual: 1700, inputMultiplier: 1_000_000, cachedInputTokens: 400,
+    expect(settled).toEqual({ actual: 2, inputMultiplier: 1_000_000, cachedInputTokens: 400,
       cachedInputMultiplier: 250_000, outputMultiplier: 2_000_000 });
   });
 
@@ -88,13 +88,52 @@ describe('resource points policy', () => {
     const failed = reserveSubpoolQuota(db, seedData.userId, seedData.keyId, weighted);
     finalizeSubpoolQuota(db, failed.reservationId, null, null, 'failed_before_usage');
     expect(db.prepare(`SELECT used_units used, reserved_units reserved FROM resource_member_quotas`).get())
-      .toEqual({ used: 19, reserved: 0 });
+      .toEqual({ used: 1, reserved: 0 });
   });
 
   it('blocks new reservations at the official protection line', () => {
     const seedData = seed(2);
     expect(() => reserveSubpoolQuota(db, seedData.userId, seedData.keyId, 1))
       .toThrowError(ResourceQuotaError);
+  });
+
+  it('uses the independent 80 percent floor during phase one', () => {
+    const seedData = seed(80);
+    db.prepare(`UPDATE resource_subpools SET quota_phase = 1`).run();
+    expect(() => reserveSubpoolQuota(db, seedData.userId, seedData.keyId, 1))
+      .toThrowError(ResourceQuotaError);
+  });
+
+  it('does not automatically release the next phase when points run out', () => {
+    const seedData = seed(70);
+    db.prepare(`UPDATE resource_subpools SET quota_phase = 1,
+      phase_started_official_percent = 100, phase_released_units = 500,
+      frozen_member_quota_units = 1000`).run();
+    db.prepare(`UPDATE resource_subpool_quota_periods SET allocation_units = 500, used_units = 500`).run();
+    db.prepare(`UPDATE resource_member_quotas SET allocation_units = 500, used_units = 500`).run();
+
+    expect(() => reserveSubpoolQuota(db, seedData.userId, seedData.keyId, 1))
+      .toThrowError(ResourceQuotaError);
+    expect(db.prepare(`SELECT allocation_units allocation, used_units used,
+      reserved_units reserved FROM resource_subpool_quota_periods`).get())
+      .toEqual({ allocation: 500, used: 500, reserved: 0 });
+    expect(db.prepare(`SELECT allocation_units allocation, used_units used,
+      reserved_units reserved FROM resource_member_quotas`).get())
+      .toEqual({ allocation: 500, used: 500, reserved: 0 });
+  });
+
+  it('freezes the stage-two factor for token estimates without changing direct unit reservations', () => {
+    const seedData = seed();
+    db.prepare(`UPDATE resource_subpools SET quota_phase = 5,
+      phase_multiplier_factor_micros = 1250000`).run();
+    const weighted = reserveSubpoolQuota(db, seedData.userId, seedData.keyId, {
+      modelId: 'gpt-calibrated', inputTokens: 750, outputTokens: 750,
+      inputMultiplierMicros: 1_000_000, outputMultiplierMicros: 1_000_000, units: 1500,
+    });
+    expect(weighted.reservedUnits).toBe(2);
+    finalizeSubpoolQuota(db, weighted.reservationId, null, null, 'failed_before_usage');
+    const direct = reserveSubpoolQuota(db, seedData.userId, seedData.keyId, 200);
+    expect(direct.reservedUnits).toBe(200);
   });
 
   it('keeps defaults and validates policy updates', () => {

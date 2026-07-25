@@ -39,6 +39,7 @@ import {
   unbindResourceSubpoolAccount,
 } from '../services/resource-subpool-operations.js';
 import { listResourceAlerts, resolveResourceAlert } from '../services/resource-alerts.js';
+import { getResourceQuotaStageAnalysis, releaseResourceQuotaStageTwo } from '../services/resource-quota-stages.js';
 
 export const adminResourcesRouter = Router();
 
@@ -279,6 +280,22 @@ adminResourcesRouter.get('/subpools/:id', (req, res) => {
   const detail = getResourceSubpoolDetail(getDb(), Number(req.params.id));
   if (!detail) { res.status(404).json({ error: { type: 'resource_subpool_not_found' } }); return; }
   res.json(detail);
+});
+
+adminResourcesRouter.get('/subpools/:id/quota-stage', (req, res) => {
+  const stage = getResourceQuotaStageAnalysis(getDb(), Number(req.params.id));
+  if (!stage) { res.status(404).json({ error: { type: 'resource_subpool_not_found' } }); return; }
+  res.json({ stage });
+});
+
+adminResourcesRouter.post('/subpools/:id/quota-stage/release', (req, res) => {
+  try {
+    res.json({ stage: releaseResourceQuotaStageTwo(getDb(), {
+      subpoolId: Number(req.params.id),
+      adminId: adminId(req),
+      multiplierFactor: Number(req.body?.multiplierFactor ?? 1),
+    }) });
+  } catch (error) { subpoolOperationError(res, error); }
 });
 
 adminResourcesRouter.post('/subpools/:id/cancel-and-refund', (req, res) => {

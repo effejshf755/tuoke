@@ -114,11 +114,11 @@ export function activateSubpool(
       || member.orderProductId !== pool.productId
       || member.orderSubpoolId !== pool.id);
     if (invalidMember) throw new Error(`Subpool member ${invalidMember.memberId} does not have a valid grouped order`);
-    const account = db.prepare(`SELECT id, quota_reset_at resetAt
+    const account = db.prepare(`SELECT id, quota_remaining_percent remainingPercent, quota_reset_at resetAt
       FROM codex_oauth_accounts
       WHERE id = ? AND enabled = 1 AND status = 'healthy'
         AND resource_scope = 'resource_subpool'`).get(pool.pendingAccountId) as {
-        id: number; resetAt: string | null;
+        id: number; remainingPercent: number | null; resetAt: string | null;
       } | undefined;
     if (!account) throw new Error('Selected Codex OAuth account is not a healthy resource-subpool account');
     const conflict = db.prepare(`SELECT subpool_id subpoolId FROM resource_subpool_bindings
@@ -127,7 +127,9 @@ export function activateSubpool(
     const existingBinding = db.prepare(`SELECT 1 FROM resource_subpool_bindings WHERE subpool_id = ? AND status IN ('active', 'migrating')`).get(pool.id);
     if (existingBinding) throw new Error('Subpool already has a dedicated account binding');
 
-    const allocationUnits = pool.totalQuotaUnits;
+    const stageOneReleasePercent = 20;
+    const stageMemberUnits = Math.max(1, Math.floor(pool.memberQuotaUnits * stageOneReleasePercent / 100));
+    const allocationUnits = stageMemberUnits * members.length;
     const binding = db.prepare(`INSERT INTO resource_subpool_bindings (subpool_id, codex_account_id, status)
       VALUES (?, ?, 'active')`).run(pool.id, account.id);
     if (!binding.lastInsertRowid) throw new Error('Failed to create dedicated account binding');
@@ -142,7 +144,7 @@ export function activateSubpool(
     const quotaPeriodId = Number(period.lastInsertRowid);
     const memberAllocations: ActivatedSubpoolResult['memberAllocations'] = [];
     for (const member of members) {
-      const memberUnits = pool.memberQuotaUnits;
+      const memberUnits = stageMemberUnits;
       db.prepare(`INSERT INTO resource_member_quotas
         (subpool_period_id, member_id, allocation_units, status)
         VALUES (?, ?, ?, 'active')`).run(quotaPeriodId, member.memberId, memberUnits);
@@ -150,7 +152,7 @@ export function activateSubpool(
         (subpool_id, period_id, member_id, type, delta_units, balance_after_units, reason)
         VALUES (?, ?, ?, 'reset', ?, ?, ?)`).run(
           pool.id, quotaPeriodId, member.memberId, memberUnits, memberUnits,
-          `Subpool activation by admin ${adminId}; product entitlement ${pool.memberQuotaUnits} units`,
+          `Stage one activation by admin ${adminId}; ${stageOneReleasePercent}% of ${pool.memberQuotaUnits} promised units`,
         );
       memberAllocations.push({ memberId: member.memberId, allocationUnits: memberUnits });
     }
@@ -163,8 +165,22 @@ export function activateSubpool(
     const activated = db.prepare(`UPDATE resource_subpools
       SET status = 'active', starts_at = datetime('now'), ends_at = datetime('now', ?),
           activated_by_admin_id = ?, activated_at = datetime('now'),
-          pending_codex_account_id = NULL, updated_at = datetime('now')
-      WHERE id = ? AND status = 'waiting_resource'`).run(durationModifier, adminId, pool.id);
+          pending_codex_account_id = NULL, quota_stage = 1,
+          stage_one_release_percent = ?, stage_one_floor_percent = 50,
+          stage_started_official_percent = ?, stage_one_released_units = ?,
+          stage_one_used_units = NULL, stage_one_completed_official_percent = NULL,
+          stage_one_completed_at = NULL, stage_two_released_at = NULL,
+          stage_two_multiplier_factor_micros = 1000000,
+          quota_phase = 1, phase_release_percent = 20,
+          phase_started_official_percent = ?, phase_started_used_units = 0,
+          phase_released_units = ?, phase_multiplier_factor_micros = 1000000,
+          phase_started_at = datetime('now'),
+          updated_at = datetime('now')
+      WHERE id = ? AND status = 'waiting_resource'`).run(
+        durationModifier, adminId, stageOneReleasePercent,
+        account.remainingPercent ?? 100, allocationUnits,
+        account.remainingPercent ?? 100, allocationUnits, pool.id,
+      );
     if (activated.changes !== 1) throw new Error('Subpool state changed during activation');
 
     recordResourceAdminAudit(db, {

@@ -55,10 +55,10 @@ describe('resource stream interruption settlement', () => {
       logRequest('openai-codex', 'gpt-stream', -1, 'error', 20, 7, 25, 'client disconnected after stream usage');
     });
     expect(getDb().prepare(`SELECT used_units used, reserved_units reserved
-      FROM resource_member_quotas WHERE id = ?`).get(seed.quotaId)).toEqual({ used: 27, reserved: 0 });
+      FROM resource_member_quotas WHERE id = ?`).get(seed.quotaId)).toEqual({ used: 1, reserved: 0 });
     expect(getDb().prepare(`SELECT status, settlement_status settlementStatus, actual_units actual
       FROM resource_quota_reservations WHERE id = ?`).get(reservation.reservationId))
-      .toEqual({ status: 'settled', settlementStatus: 'partial', actual: 27 });
+      .toEqual({ status: 'settled', settlementStatus: 'partial', actual: 1 });
     expect((getDb().prepare('SELECT balance_micro balance FROM users WHERE id = ?').get(seed.userId) as any).balance)
       .toBe(100000000);
   });

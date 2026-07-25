@@ -6,6 +6,7 @@ import { createResourceProduct, publishResourceProduct } from '../../services/re
 import { groupPaidResourceOrder, markResourceOrderPaidForGrouping } from '../../services/resource-grouping.js';
 import { activateSubpool, clearStagedSubpoolCodexAccount, stageSubpoolCodexAccount } from '../../services/resource-subpool-activation.js';
 import { createConsumerApiKey } from '../../services/consumer-api-keys.js';
+import { getResourceQuotaStageAnalysis, releaseResourceQuotaStageTwo } from '../../services/resource-quota-stages.js';
 
 describe('resource subpool activation', () => {
   let db: Database.Database;
@@ -59,11 +60,13 @@ describe('resource subpool activation', () => {
     const result = activateSubpool(db, subpoolId, adminId);
     expect(result.status).toBe('active');
     expect(result.accountId).toBe(accountId);
-    expect(result.allocationUnits).toBe(1_000_000);
+    expect(result.allocationUnits).toBe(200_000);
     expect(result.memberAllocations).toHaveLength(4);
-    expect(result.memberAllocations.every((quota) => quota.allocationUnits === 250_000)).toBe(true);
-    const pool = db.prepare(`SELECT status, pending_codex_account_id pendingAccount, activated_by_admin_id admin FROM resource_subpools WHERE id = ?`).get(subpoolId);
-    expect(pool).toEqual({ status: 'active', pendingAccount: null, admin: adminId });
+    expect(result.memberAllocations.every((quota) => quota.allocationUnits === 50_000)).toBe(true);
+    const pool = db.prepare(`SELECT status, pending_codex_account_id pendingAccount,
+      activated_by_admin_id admin, quota_phase quotaPhase,
+      phase_released_units phaseReleasedUnits FROM resource_subpools WHERE id = ?`).get(subpoolId);
+    expect(pool).toEqual({ status: 'active', pendingAccount: null, admin: adminId, quotaPhase: 1, phaseReleasedUnits: 200_000 });
     expect((db.prepare(`SELECT COUNT(*) count FROM resource_subpool_bindings WHERE subpool_id = ? AND status = 'active'`).get(subpoolId) as { count: number }).count).toBe(1);
     expect((db.prepare(`SELECT COUNT(*) count FROM resource_quota_ledger WHERE subpool_id = ? AND type = 'reset'`).get(subpoolId) as { count: number }).count).toBe(4);
     expect((db.prepare(`SELECT COUNT(*) count FROM resource_subpool_members WHERE subpool_id = ? AND consumer_api_key_id IS NOT NULL`).get(subpoolId) as { count: number }).count).toBe(4);
@@ -80,6 +83,44 @@ describe('resource subpool activation', () => {
       .toEqual({ action: 'codex_account_stage_cleared' });
   });
 
+  it('releases stage two with a calibrated subpool multiplier', () => {
+    const { subpoolId } = createFormedSubpool();
+    const accountId = createAccount('staged-release-account');
+    stageSubpoolCodexAccount(db, subpoolId, accountId);
+    const activated = activateSubpool(db, subpoolId, adminId);
+
+    expect(getResourceQuotaStageAnalysis(db, subpoolId)).toMatchObject({
+      quotaPhase: 1,
+      phaseReleasedUnits: 200_000,
+      phaseReady: false,
+    });
+
+    db.prepare(`UPDATE resource_subpool_quota_periods SET used_units = 160000 WHERE id = ?`).run(activated.quotaPeriodId);
+    db.prepare(`UPDATE resource_member_quotas SET used_units = 40000 WHERE subpool_period_id = ?`).run(activated.quotaPeriodId);
+    db.prepare(`UPDATE codex_oauth_accounts SET quota_remaining_percent = 80 WHERE id = ?`).run(accountId);
+    expect(getResourceQuotaStageAnalysis(db, subpoolId)).toMatchObject({
+      phaseReady: true,
+      phaseUsedUnits: 160_000,
+      suggestedMultiplierFactor: 1.25,
+    });
+
+    const released = releaseResourceQuotaStageTwo(db, { subpoolId, adminId, multiplierFactor: 1.25 });
+    expect(released).toMatchObject({ quotaPhase: 2, allocationUnits: 400_000, phaseMultiplierFactor: 1.25 });
+    expect(db.prepare(`SELECT DISTINCT allocation_units allocation FROM resource_member_quotas
+      WHERE subpool_period_id = ?`).all(activated.quotaPeriodId)).toEqual([{ allocation: 100_000 }]);
+    expect(db.prepare(`SELECT action FROM resource_admin_audit_logs WHERE subpool_id = ? ORDER BY id DESC LIMIT 1`).get(subpoolId))
+      .toEqual({ action: 'quota_phase_released' });
+  });
+
+  it('does not release stage two before the stage-one boundary', () => {
+    const { subpoolId } = createFormedSubpool();
+    const accountId = createAccount('early-release-account', 100);
+    stageSubpoolCodexAccount(db, subpoolId, accountId);
+    activateSubpool(db, subpoolId, adminId);
+    expect(() => releaseResourceQuotaStageTwo(db, { subpoolId, adminId, multiplierFactor: 1 }))
+      .toThrow(/has not reached/i);
+  });
+
   it('uses the entitlement frozen at grouping after the product row changes', () => {
     const { subpoolId, productId } = createFormedSubpool();
     db.prepare(`UPDATE resource_products
@@ -89,11 +130,11 @@ describe('resource subpool activation', () => {
     stageSubpoolCodexAccount(db, subpoolId, accountId);
 
     const result = activateSubpool(db, subpoolId, adminId);
-    expect(result.allocationUnits).toBe(1_000_000);
-    expect(result.memberAllocations.every((quota) => quota.allocationUnits === 250_000)).toBe(true);
+    expect(result.allocationUnits).toBe(200_000);
+    expect(result.memberAllocations.every((quota) => quota.allocationUnits === 50_000)).toBe(true);
     expect(db.prepare(`SELECT allocation_units allocation, meter_version meterVersion
       FROM resource_subpool_quota_periods WHERE id = ?`).get(result.quotaPeriodId)).toEqual({
-      allocation: 1_000_000,
+      allocation: 200_000,
       meterVersion: 'tokens-v1',
     });
   });

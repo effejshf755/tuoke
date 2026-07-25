@@ -89,7 +89,7 @@ describe('resource user queries', () => {
 
     const subscriptions = listUserResourceSubscriptions(db, firstUserId) as any[];
     expect(subscriptions).toHaveLength(1);
-    expect(subscriptions[0]).toMatchObject({ subpoolId, totalQuotaUnits: 500_000, usedQuotaUnits: 0 });
+    expect(subscriptions[0]).toMatchObject({ subpoolId, totalQuotaUnits: 100_000, usedQuotaUnits: 0 });
     expect(JSON.stringify({ firstOrders, subscriptions })).not.toMatch(/private-account|accountId|oauth|secret/i);
     expect(listUserResourceSubscriptions(db, user('outsider@example.com'))).toEqual([]);
     const detail = getUserResourceSubscriptionDetail(db, firstUserId, subpoolId)!;

@@ -68,7 +68,7 @@ describe('resource admin operations', () => {
     expect((detail.members as any[]).every((member) => Array.isArray(member.apiKeys))).toBe(true);
     expect((detail.pool as any).accountId).toBe(seeded.accountId);
     expect((detail.pool as any)).toMatchObject({ memberLimit: 4, productId: seeded.productId });
-    expect(getResourceMemberQuota(db, seeded.subpoolId, seeded.memberId)).toMatchObject({ allocationUnits: 250_000, remainingUnits: 250_000 });
+    expect(getResourceMemberQuota(db, seeded.subpoolId, seeded.memberId)).toMatchObject({ allocationUnits: 50_000, remainingUnits: 50_000 });
     const accounts = listAvailableCodexAccounts(db) as any[];
     expect(accounts.some((row) => row.id === seeded.accountId)).toBe(false);
     expect(accounts.some((row) => row.id === freeAccountId)).toBe(true);
@@ -80,7 +80,7 @@ describe('resource admin operations', () => {
       subpoolId: seeded.subpoolId, memberId: seeded.memberId,
       deltaUnits: -10_000, reason: 'manual correction', adminId,
     });
-    expect(adjusted).toMatchObject({ allocationUnits: 240_000, remainingUnits: 240_000 });
+    expect(adjusted).toMatchObject({ allocationUnits: 40_000, remainingUnits: 40_000 });
     const ledger = db.prepare(`SELECT delta_units delta, reason FROM resource_quota_ledger WHERE id = ?`).get(adjusted.ledgerId);
     expect(ledger).toEqual({ delta: -10_000, reason: 'manual correction' });
     const audits = listResourceAdminAuditLogs(db, { subpoolId: seeded.subpoolId }) as any[];
@@ -90,7 +90,7 @@ describe('resource admin operations', () => {
       subpoolId: seeded.subpoolId, memberId: seeded.memberId,
       deltaUnits: 20_000, reason: 'would exceed pool', adminId,
     })).toThrow(/exceed/);
-    expect((db.prepare(`SELECT allocation_units allocation FROM resource_member_quotas WHERE member_id = ?`).get(seeded.memberId) as any).allocation).toBe(240_000);
+    expect((db.prepare(`SELECT allocation_units allocation FROM resource_member_quotas WHERE member_id = ?`).get(seeded.memberId) as any).allocation).toBe(40_000);
   });
 
   it('queries Codex usage through the member quota reservation chain', () => {

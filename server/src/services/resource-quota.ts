@@ -23,6 +23,8 @@ export interface ResourceQuotaEstimate {
   units: number;
 }
 
+export const RESOURCE_TOKENS_PER_POINT = 1500;
+
 function requestModel(body: unknown): string {
   const request = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
   return String(request.model ?? 'codex').trim() || 'codex';
@@ -35,7 +37,7 @@ export function calculateResourcePoints(inputTokens: number, outputTokens: numbe
   const weighted = (totalInput - cachedInput) * Math.max(1, Math.trunc(inputMultiplierMicros))
     + cachedInput * Math.max(1, Math.trunc(cachedInputMultiplierMicros))
     + Math.max(0, Math.trunc(outputTokens)) * Math.max(1, Math.trunc(outputMultiplierMicros));
-  return Math.max(1, Math.ceil(weighted / 1_000_000));
+  return Math.max(1, Math.ceil(weighted / (1_000_000 * RESOURCE_TOKENS_PER_POINT)));
 }
 
 export function estimateCodexQuotaUnits(db: Db, body: unknown): ResourceQuotaEstimate {
@@ -67,6 +69,9 @@ interface EntitlementRow {
   mode: 'dedicated' | 'scheduled'; groupAllocation: number; groupUsed: number;
   groupReserved: number; memberAllocation: number; memberUsed: number; memberReserved: number;
   officialRemainingPercent: number | null; officialResetAt: string | null; officialFloorPercent: number;
+  quotaStage: number; stageOneFloorPercent: number; stageTwoMultiplierFactorMicros: number;
+  stageStartedOfficialPercent: number | null; promisedMemberUnits: number | null;
+  quotaPhase: number; phaseMultiplierFactorMicros: number;
 }
 
 export function reserveSubpoolQuota(db: Db, userId: number, consumerApiKeyId: number, estimateOrUnits: ResourceQuotaEstimate | number) {
@@ -74,7 +79,6 @@ export function reserveSubpoolQuota(db: Db, userId: number, consumerApiKeyId: nu
     modelId: 'codex', inputTokens: 0, outputTokens: 0, inputMultiplierMicros: 1_000_000,
     cachedInputMultiplierMicros: 250_000, outputMultiplierMicros: 1_000_000, units: estimateOrUnits,
   } : estimateOrUnits;
-  const requested = Math.max(1, Math.trunc(estimate.units));
   return db.transaction(() => {
     const row = db.prepare(`
       SELECT s.id subpoolId, m.id memberId, p.id periodId, q.id memberQuotaId,
@@ -82,7 +86,12 @@ export function reserveSubpoolQuota(db: Db, userId: number, consumerApiKeyId: nu
         p.reserved_units groupReserved, q.allocation_units memberAllocation,
         q.used_units memberUsed, q.reserved_units memberReserved,
         a.quota_remaining_percent officialRemainingPercent, a.quota_reset_at officialResetAt,
-        policy.official_quota_floor_percent officialFloorPercent
+        policy.official_quota_floor_percent officialFloorPercent,
+        s.quota_stage quotaStage, s.stage_one_floor_percent stageOneFloorPercent,
+        s.stage_two_multiplier_factor_micros stageTwoMultiplierFactorMicros,
+        s.stage_started_official_percent stageStartedOfficialPercent,
+        s.frozen_member_quota_units promisedMemberUnits,
+        s.quota_phase quotaPhase, s.phase_multiplier_factor_micros phaseMultiplierFactorMicros
       FROM resource_subpool_members m
       JOIN resource_member_api_keys mk ON mk.member_id = m.id
       JOIN resource_subpools s ON s.id = m.subpool_id
@@ -104,12 +113,22 @@ export function reserveSubpoolQuota(db: Db, userId: number, consumerApiKeyId: nu
         WHERE m.user_id = ? AND mk.consumer_api_key_id = ? AND m.status = 'active'`).get(userId, consumerApiKeyId);
       throw new ResourceQuotaError(member ? 'resource_subpool_inactive' : 'resource_entitlement_required', member ? 'No active quota period is available.' : 'An active Codex subpool entitlement is required.');
     }
+    const phaseFloors = [80, 60, 40, 20, row.officialFloorPercent];
+    const activeFloorPercent = phaseFloors[Math.min(5, Math.max(1, row.quotaPhase)) - 1];
     if (row.officialRemainingPercent !== null
-      && row.officialRemainingPercent <= row.officialFloorPercent
+      && row.officialRemainingPercent <= activeFloorPercent
       && (row.officialResetAt === null || new Date(row.officialResetAt).getTime() > Date.now())) {
       throw new ResourceQuotaError('resource_official_quota_protected',
-        `Official Codex quota reached the ${row.officialFloorPercent}% protection line.`);
+        `Official Codex quota reached the ${activeFloorPercent}% protection line.`);
     }
+    const stageFactor = Math.max(1, row.phaseMultiplierFactorMicros);
+    const effectiveInputMultiplierMicros = Math.max(1, Math.round(estimate.inputMultiplierMicros * stageFactor / 1_000_000));
+    const effectiveCachedInputMultiplierMicros = Math.max(1, Math.round((estimate.cachedInputMultiplierMicros ?? 250_000) * stageFactor / 1_000_000));
+    const effectiveOutputMultiplierMicros = Math.max(1, Math.round(estimate.outputMultiplierMicros * stageFactor / 1_000_000));
+    const requested = typeof estimateOrUnits === 'number'
+      ? Math.max(1, Math.trunc(estimate.units))
+      : calculateResourcePoints(estimate.inputTokens, estimate.outputTokens,
+        effectiveInputMultiplierMicros, effectiveOutputMultiplierMicros, 0, effectiveCachedInputMultiplierMicros);
     if (row.groupAllocation - row.groupUsed - row.groupReserved < requested ||
         row.memberAllocation - row.memberUsed - row.memberReserved < requested) {
       throw new ResourceQuotaError('resource_quota_exhausted', 'Codex subpool quota is exhausted.');
@@ -124,8 +143,8 @@ export function reserveSubpoolQuota(db: Db, userId: number, consumerApiKeyId: nu
        output_multiplier_micros, official_quota_percent_before)
       VALUES (?, ?, ?, ?, ?, datetime('now', '+15 minutes'), ?, ?, ?, ?, ?)`).run(
         correlationId, row.subpoolId, row.periodId, row.memberQuotaId, requested,
-        estimate.modelId, estimate.inputMultiplierMicros, estimate.cachedInputMultiplierMicros ?? 250_000,
-        estimate.outputMultiplierMicros,
+        estimate.modelId, effectiveInputMultiplierMicros, effectiveCachedInputMultiplierMicros,
+        effectiveOutputMultiplierMicros,
         row.officialRemainingPercent,
       );
     const reservationId = Number(inserted.lastInsertRowid);
