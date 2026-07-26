@@ -60,6 +60,7 @@ const CURRENT_MIGRATIONS_AFTER_KEYS = [
   '20260726_000046_resource_quota_phases.ts',
   '20260726_000047_consumer_api_key_ciphertext.ts',
   '20260726_000048_codex_cached_billing.ts',
+  '20260726_000049_site_notifications.ts',
 ];
 
 interface SchemaRow {

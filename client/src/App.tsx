@@ -1,7 +1,7 @@
 import { type ReactNode } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, NavLink, Link, useLocation, useNavigate } from 'react-router-dom'
 import { MutationCache, QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
-import { ChevronDown, Languages, Menu, MoreHorizontal, Search } from 'lucide-react'
+import { Bell, ChevronDown, Languages, Menu, MoreHorizontal, Search } from 'lucide-react'
 import { Button, buttonVariants } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -22,7 +22,7 @@ import { ErrorBoundary } from '@/components/error-boundary'
 import { Toaster } from '@/components/toaster'
 import Waves from '@/components/Waves'
 import { I18nProvider, useI18n, SUPPORTED_LOCALES, type Locale } from '@/i18n'
-import { logout } from '@/lib/api'
+import { apiFetch, logout } from '@/lib/api'
 import { toast } from '@/lib/toast'
 import KeysPage from '@/pages/KeysPage'
 import UserApiKeysPage from '@/pages/UserApiKeysPage'
@@ -59,6 +59,8 @@ import { AdminResourceAuditPage, AdminResourcesPage, AdminResourceSubpoolsPage }
 import { AdminResourceProductsPage } from '@/pages/AdminResourceProductsPage'
 import { AdminResourceOrdersPage } from '@/pages/AdminResourceOrdersPage'
 import { AdminResourceSubpoolDetailPage } from '@/pages/AdminResourceSubpoolDetailPage'
+import NotificationsPage from '@/pages/NotificationsPage'
+import AdminNotificationsPage from '@/pages/AdminNotificationsPage'
 
 // Every failed mutation surfaces as an error toast, so no action fails
 // silently. A page that already shows the failure inline can opt out with
@@ -166,6 +168,12 @@ function Navbar() {
   const isPublicHome = location.pathname === '/'
   const navigate = useNavigate()
   const { data: authStatus } = useQuery<{ role: 'admin' | 'user' | null }>({ queryKey: ['auth-status'] })
+  const { data: notifications } = useQuery<{ unreadCount: number }>({
+    queryKey: ['user-notifications'],
+    queryFn: () => apiFetch('/api/user/notifications'),
+    enabled: Boolean(authStatus?.role),
+    refetchInterval: 15_000,
+  })
   const visibleNavItems = authStatus?.role === 'admin' ? navItems : authStatus?.role === 'user' ? [{ to: '/models', labelKey: 'nav.models' }, { to: '/codex', labelKey: 'Codex' }, { to: '/resources/products', labelKey: 'Codex 拼单' }, { to: '/playground', labelKey: 'nav.playground' }, { to: '/user-center', labelKey: 'nav.console' }, { to: '/analytics', labelKey: 'nav.analytics' }, { to: '/my', labelKey: 'nav.me' }] : [{ to: '/', labelKey: 'nav.home' }, { to: '/user-models', labelKey: 'nav.models' }]
 
   function isActiveRoute(to: string) {
@@ -230,6 +238,7 @@ function Navbar() {
             <Search className="size-3.5" />
             <kbd className="text-[10px] text-muted-foreground">{isMac ? '⌘K' : 'Ctrl K'}</kbd>
           </button>
+          {authStatus?.role && <button type="button" onClick={() => navigate('/notifications')} aria-label={`消息通知${notifications?.unreadCount ? `，${notifications.unreadCount} 条未读` : ''}`} className={`${buttonVariants({ variant: 'ghost', size: 'icon' })} relative rounded-xl border border-white/10 bg-white/[0.05] hover:bg-white/[0.10]`}><Bell />{Boolean(notifications?.unreadCount) && <span className="absolute -right-1 -top-1 flex min-w-4 items-center justify-center rounded-full bg-foreground px-1 text-[10px] font-semibold leading-4 text-background">{Math.min(notifications!.unreadCount, 99)}</span>}</button>}
           <DropdownMenu>
             <DropdownMenuTrigger
               className={`${buttonVariants({ variant: 'ghost', size: 'icon' })} rounded-xl border border-white/10 bg-white/[0.05] shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] transition-[background-color,transform] hover:bg-white/[0.10] active:scale-95`}
@@ -239,6 +248,7 @@ function Navbar() {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-48">
               <DropdownMenuItem onClick={() => navigate('/api-docs')}>API 文档</DropdownMenuItem>
+              {authStatus?.role === 'admin' && <DropdownMenuItem onClick={() => navigate('/admin/notifications')}>发布通知</DropdownMenuItem>}
               {authStatus?.role === 'user' && <DropdownMenuItem onClick={() => navigate('/keys')}>API 密钥</DropdownMenuItem>}
               <LanguageSubMenu />
               {!isDesktopApp && (
@@ -287,10 +297,12 @@ function Navbar() {
                     </DropdownMenuItem>
                   ),
                 )}
+                {authStatus?.role && <DropdownMenuItem onClick={() => navigate('/notifications')}>消息通知{notifications?.unreadCount ? `（${notifications.unreadCount}）` : ''}</DropdownMenuItem>}
               </DropdownMenuGroup>
               <DropdownMenuSeparator />
               <DropdownMenuGroup>
                 <DropdownMenuItem onClick={() => navigate('/api-docs')}>API 文档</DropdownMenuItem>
+                {authStatus?.role === 'admin' && <DropdownMenuItem onClick={() => navigate('/admin/notifications')}>发布通知</DropdownMenuItem>}
                 {authStatus?.role === 'user' && <DropdownMenuItem onClick={() => navigate('/keys')}>API 密钥</DropdownMenuItem>}
                 <LanguageSubMenu />
                 {!isDesktopApp && (
@@ -401,12 +413,14 @@ function App() {
                 <Route path="/account-settings" element={<AccountSettingsPage />} />
                 <Route path="/user-models" element={<UserModelsPage />} />
                 <Route path="/api-docs" element={<ApiDocsPage />} />
+                <Route path="/notifications" element={<NotificationsPage />} />
                 <Route path="/admin/users" element={<AdminUsersPage />} />
                 <Route path="/admin/dashboard" element={<AdminDashboardPage />} />
                 <Route path="/admin/models" element={<AdminModelsPage />} />
                 <Route path="/admin/user-codex" element={<AdminUserCodexPage />} />
                 <Route path="/admin/recharge" element={<AdminRechargePage />} />
                 <Route path="/admin/settings" element={<AdminSettingsPage />} />
+                <Route path="/admin/notifications" element={<AdminNotificationsPage />} />
                 <Route path="/admin/codex" element={<Navigate to="/admin/codex/accounts" replace />} />
                 <Route path="/admin/codex/accounts" element={<AdminCodexAccountsPage />} />
                 <Route path="/admin/codex/monitor" element={<AdminCodexStatsPage />} />

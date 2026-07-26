@@ -43,6 +43,7 @@ import { loadConfig } from './lib/config.js';
 import { getSetting } from './db/index.js';
 import { publicPlatformRouter } from './routes/public-platform.js';
 import { adminResourcesRouter } from './routes/admin-resources.js';
+import { notificationsRouter, adminNotificationsRouter } from './routes/notifications.js';
 import { resourceUserRouter } from './routes/resource-user.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -105,6 +106,7 @@ export function createApp(config?: Config) {
   app.use('/api/consumer-keys', requireAuth, consumerApiKeysRouter);
   app.use('/api/user/wallet', requireAuth, userWalletRouter);
   app.use('/api/user/recharge', requireAuth, userRechargeRouter);
+  app.use('/api/user/notifications', requireAuth, notificationsRouter);
   app.use('/api/user', requireAuth, userRouter);
   app.use('/api/user/analytics', requireAuth, userAnalyticsRouter);
   app.use('/api/admin/users', requireAuth, requireAdmin, adminUsersRouter);
@@ -115,6 +117,7 @@ export function createApp(config?: Config) {
   app.use('/api/admin/settings', requireAuth, requireAdmin, adminPlatformSettingsRouter);
   app.use('/api/admin/codex', requireAuth, requireAdmin, codexOauthRouter);
   app.use('/api/admin/resources', requireAuth, requireAdmin, adminResourcesRouter);
+  app.use('/api/admin/notifications', requireAuth, requireAdmin, adminNotificationsRouter);
   app.use('/api/resources', requireAuth, resourceUserRouter);
   app.use('/api/admin/codex-auth', codexAuthRouter);
 
