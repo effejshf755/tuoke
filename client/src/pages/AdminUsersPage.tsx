@@ -490,13 +490,23 @@ export default function AdminUsersPage() {
 
   return (
     <div className="max-w-[1600px]">
-      <h1 className="text-xl font-semibold">
-        用户管理
-      </h1>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-semibold">
+            用户管理
+          </h1>
 
-      <p className="mt-1 text-sm text-muted-foreground">
-        管理用户、钱包余额、API 使用情况和登录会话。
-      </p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            管理用户、钱包余额、API 使用情况和登录会话。
+          </p>
+        </div>
+        <div className="text-sm text-muted-foreground tabular-nums">
+          共 {mergedUsers.length} 人
+          {search.trim() && filteredUsers.length !== mergedUsers.length
+            ? ` · 当前显示 ${filteredUsers.length} 人`
+            : ''}
+        </div>
+      </div>
 
       <div className="mt-5">
         <Input
