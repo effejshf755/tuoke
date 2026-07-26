@@ -100,11 +100,11 @@ export default function PublicHomePage() {
               </h1>
 
               <h2 className="mt-7 text-2xl font-medium tracking-tight text-white/95 sm:text-3xl lg:text-4xl">
-                按量调用，透明计费的 AI 模型平台
+                免费模型、透明计费与会员拼单
               </h2>
 
               <p className="mx-auto mt-5 max-w-2xl text-base leading-8 text-white/65 sm:text-lg">
-                Codex 与主流模型统一接入，按实际 Token 使用量计费，灵活、清晰、可控。
+                免费 AI 模型开放使用，大模型按实际 Token 透明计费，会员额度按拼单人数平均分配。
               </p>
             </div>
 
