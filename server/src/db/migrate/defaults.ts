@@ -55,6 +55,7 @@ import * as resourceQuotaPhases from '../migrations/20260726_000046_resource_quo
 import * as consumerApiKeyCiphertext from '../migrations/20260726_000047_consumer_api_key_ciphertext.js';
 import * as codexCachedBilling from '../migrations/20260726_000048_codex_cached_billing.js';
 import * as siteNotifications from '../migrations/20260726_000049_site_notifications.js';
+import * as manualRecharge from '../migrations/20260726_000050_manual_recharge.js';
 
 export interface MigrationModule {
   up(db: Db): void;
@@ -122,6 +123,7 @@ export const RESOURCE_QUOTA_PHASES_FILENAME = '20260726_000046_resource_quota_ph
 export const CONSUMER_API_KEY_CIPHERTEXT_FILENAME = '20260726_000047_consumer_api_key_ciphertext.ts';
 export const CODEX_CACHED_BILLING_FILENAME = '20260726_000048_codex_cached_billing.ts';
 export const SITE_NOTIFICATIONS_FILENAME = '20260726_000049_site_notifications.ts';
+export const MANUAL_RECHARGE_FILENAME = '20260726_000050_manual_recharge.ts';
 
 export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: LEGACY_BASELINE_FILENAME, module: legacyBaseline },
@@ -180,4 +182,5 @@ export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: CONSUMER_API_KEY_CIPHERTEXT_FILENAME, module: consumerApiKeyCiphertext },
   { filename: CODEX_CACHED_BILLING_FILENAME, module: codexCachedBilling },
   { filename: SITE_NOTIFICATIONS_FILENAME, module: siteNotifications },
+  { filename: MANUAL_RECHARGE_FILENAME, module: manualRecharge },
 ];

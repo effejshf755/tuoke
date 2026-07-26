@@ -2,10 +2,11 @@
 
 import { Router } from 'express';
 import type { Request } from 'express';
+import multer from 'multer';
 import { z } from 'zod';
 
 import { getDb } from '../db/index.js';
-import { getSetting } from '../db/index.js';
+import { getSetting, setSetting } from '../db/index.js';
 import { createPagePayment, isAlipayConfigured, settleAlipayOrder, verifyNotify } from '../services/alipay.js';
 import { activateRechargedFreeTier } from '../services/free-model-access.js';
 
@@ -16,6 +17,13 @@ export const adminRechargeRouter =
   Router();
 
 export const alipayNotifyRouter = Router();
+
+const MANUAL_RECHARGE_THRESHOLD_MICRO = 100_000_000;
+const proofUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 3 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, callback) => callback(null, ['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)),
+});
 
 const createOrderSchema =
   z.object({
@@ -104,8 +112,12 @@ function createOrderNo(): string {
   return `R${Date.now()}${random}`;
 }
 
+function createPaymentReference(): string {
+  return `TK${Date.now().toString().slice(-6)}${Math.floor(1000 + Math.random() * 9000)}`;
+}
+
 function expireRechargeOrders(): void {
-  getDb().prepare("UPDATE recharge_orders SET status='expired', updated_at=datetime('now') WHERE status='pending' AND expires_at IS NOT NULL AND expires_at <= datetime('now')").run();
+  getDb().prepare("UPDATE recharge_orders SET status='expired', updated_at=datetime('now') WHERE status='pending' AND expires_at IS NOT NULL AND expires_at <= datetime('now') AND (payment_method <> 'manual' OR proof_submitted_at IS NULL)").run();
 }
 
 /** Alipay asynchronous notification. This endpoint must remain unauthenticated. */
@@ -169,12 +181,21 @@ userRechargeRouter.post(
       yuanToMicro(
         parsed.data.amount,
       );
+    if (parsed.data.payment_method === 'alipay' && amountMicro >= MANUAL_RECHARGE_THRESHOLD_MICRO) {
+      res.status(400).json({ error: { message: '100元及以上请使用大额人工充值', type: 'manual_recharge_required' } });
+      return;
+    }
+    if (parsed.data.payment_method === 'manual' && amountMicro < MANUAL_RECHARGE_THRESHOLD_MICRO) {
+      res.status(400).json({ error: { message: '人工充值仅用于100元及以上订单', type: 'manual_recharge_minimum' } });
+      return;
+    }
     const minMicro = Number(getSetting('minimum_recharge_micro') ?? 1_000_000);
     const maxMicro = Number(getSetting('maximum_recharge_micro') ?? 1_000_000_000_000);
     if (amountMicro < minMicro || amountMicro > maxMicro) { res.status(400).json({ error: { message: 'Recharge amount is outside configured limits', type: 'invalid_amount' } }); return; }
 
     const orderNo =
       createOrderNo();
+    const paymentReference = parsed.data.payment_method === 'manual' ? createPaymentReference() : null;
 
     const db =
       getDb();
@@ -187,27 +208,31 @@ userRechargeRouter.post(
           amount_micro,
           status,
           payment_method,
-          payment_provider,
-          expires_at
+           payment_provider,
+           payment_reference,
+           expires_at
         )
         VALUES (
           ?,
           ?,
           ?,
           'pending',
-          ?,
-          NULL,
-          datetime(
-            'now',
-            '+30 minutes'
+           ?,
+           NULL,
+           ?,
+           datetime(
+             'now',
+             ?
           )
         )
       `).run(
         orderNo,
         userId,
         amountMicro,
-        parsed.data
-          .payment_method,
+         parsed.data
+           .payment_method,
+         paymentReference,
+         parsed.data.payment_method === 'manual' ? '+24 hours' : '+30 minutes',
       );
 
     res.status(201).json({
@@ -228,25 +253,47 @@ userRechargeRouter.post(
         status:
           'pending',
 
-        payment_method:
+         payment_method:
           parsed.data
-            .payment_method,
+             .payment_method,
+         payment_reference: paymentReference,
 
         expires_in_minutes:
-          30,
+          parsed.data.payment_method === 'manual' ? 1440 : 30,
       },
     });
   },
 );
+
+userRechargeRouter.get('/manual-config', (_req, res) => {
+  res.json({
+    threshold: MANUAL_RECHARGE_THRESHOLD_MICRO / 1_000_000,
+    qr_image: getSetting('manual_recharge_qr_image') ?? '',
+    instructions: '付款时必须填写订单提供的唯一备注码，付款后上传清晰截图。管理员核对实际到账后充值。',
+  });
+});
+
+userRechargeRouter.post('/orders/:id/proof', proofUpload.single('proof'), (req, res) => {
+  const orderId = Number(req.params.id);
+  const userId = getUserId(req);
+  if (!req.file) { res.status(400).json({ error: { message: '请选择 JPG、PNG 或 WebP 付款截图', type: 'proof_required' } }); return; }
+  const result = getDb().prepare(`UPDATE recharge_orders SET payment_proof=?, payment_proof_mime=?,
+    proof_submitted_at=datetime('now'), updated_at=datetime('now')
+    WHERE id=? AND user_id=? AND status='pending' AND payment_method='manual'`)
+    .run(req.file.buffer, req.file.mimetype, orderId, userId);
+  if (result.changes !== 1) { res.status(409).json({ error: { message: '订单不存在或当前状态不能提交凭证', type: 'invalid_order_state' } }); return; }
+  res.json({ submitted: true });
+});
 
 /** Create an Alipay page-payment form for an existing order. */
 userRechargeRouter.post('/orders/:id/alipay', (req, res) => {
   if (!isAlipayConfigured()) { res.status(503).json({ error: { message: 'Alipay is not configured', type: 'payment_unavailable' } }); return; }
   const orderId = Number(req.params.id);
   const userId = getUserId(req);
-  const order = getDb().prepare("SELECT id, order_no orderNo, amount_micro amountMicro, status FROM recharge_orders WHERE id=? AND user_id=?").get(orderId, userId) as { id:number; orderNo:string; amountMicro:number; status:string } | undefined;
+  const order = getDb().prepare("SELECT id, order_no orderNo, amount_micro amountMicro, status, payment_method paymentMethod FROM recharge_orders WHERE id=? AND user_id=?").get(orderId, userId) as { id:number; orderNo:string; amountMicro:number; status:string; paymentMethod:string|null } | undefined;
   if (!order) { res.status(404).json({ error: { message: 'Recharge order not found', type: 'not_found' } }); return; }
   if (order.status !== 'pending') { res.status(409).json({ error: { message: `Order is ${order.status}`, type: 'invalid_order_state' } }); return; }
+  if (order.paymentMethod === 'manual') { res.status(409).json({ error: { message: '人工充值订单不能发起支付宝支付', type: 'invalid_payment_method' } }); return; }
   const payment = createPagePayment(order.orderNo, order.amountMicro, `FreeLLMAPI 充值 ${order.orderNo}`);
   getDb().prepare("UPDATE recharge_orders SET payment_provider='alipay', payment_method='alipay_page', updated_at=datetime('now') WHERE id=?").run(order.id);
   res.json({ order_no: order.orderNo, mode: 'page', gateway: payment.gateway, params: payment.params, form_action: payment.gateway });
@@ -286,7 +333,9 @@ userRechargeRouter.get(
             provider_trade_no
               AS providerTradeNo,
 
-            note,
+             note,
+             payment_reference AS paymentReference,
+             proof_submitted_at AS proofSubmittedAt,
 
             created_at
               AS createdAt,
@@ -324,9 +373,11 @@ userRechargeRouter.get(
           providerTradeNo:
             | string
             | null;
-          note:
+           note:
             | string
-            | null;
+             | null;
+          paymentReference: string | null;
+          proofSubmittedAt: string | null;
           createdAt: string;
           updatedAt: string;
           expiresAt:
@@ -364,8 +415,10 @@ userRechargeRouter.get(
             provider_trade_no:
               row.providerTradeNo,
 
-            note:
-              row.note,
+           note:
+             row.note,
+           payment_reference: row.paymentReference,
+           proof_submitted_at: row.proofSubmittedAt,
 
             created_at:
               row.createdAt,
@@ -467,6 +520,21 @@ userRechargeRouter.post(
  * ==========================================================
  */
 
+adminRechargeRouter.post('/manual-config/qr', proofUpload.single('qr'), (req, res) => {
+  if (!req.file) { res.status(400).json({ error: { message: '请选择 JPG、PNG 或 WebP 收款二维码', type: 'qr_required' } }); return; }
+  const dataUrl = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
+  setSetting('manual_recharge_qr_image', dataUrl);
+  res.json({ configured: true });
+});
+
+adminRechargeRouter.get('/orders/:id/proof', (req, res) => {
+  const row = getDb().prepare(`SELECT payment_proof proof, payment_proof_mime mime
+    FROM recharge_orders WHERE id=? AND payment_proof IS NOT NULL`).get(Number(req.params.id)) as
+    { proof: Buffer; mime: string } | undefined;
+  if (!row) { res.status(404).json({ error: { message: '付款凭证不存在', type: 'not_found' } }); return; }
+  res.json({ image: `data:${row.mime};base64,${row.proof.toString('base64')}` });
+});
+
 /**
  * GET /api/admin/recharge/orders
  *
@@ -519,6 +587,8 @@ adminRechargeRouter.get(
             AS providerTradeNo,
 
           ro.note,
+          ro.payment_reference AS paymentReference,
+          ro.proof_submitted_at AS proofSubmittedAt,
 
           ro.created_at
             AS createdAt,
@@ -576,6 +646,8 @@ adminRechargeRouter.get(
         note:
           | string
           | null;
+        paymentReference: string | null;
+        proofSubmittedAt: string | null;
         createdAt: string;
         updatedAt: string;
         expiresAt:
@@ -621,6 +693,8 @@ adminRechargeRouter.get(
 
             note:
               row.note,
+            payment_reference: row.paymentReference,
+            proof_submitted_at: row.proofSubmittedAt,
 
             created_at:
               row.createdAt,
@@ -711,6 +785,8 @@ adminRechargeRouter.post(
                   AS amountMicro,
 
                 status
+                , payment_method AS paymentMethod
+                , proof_submitted_at AS proofSubmittedAt
 
               FROM recharge_orders
 
@@ -724,6 +800,8 @@ adminRechargeRouter.post(
                   userId: number;
                   amountMicro: number;
                   status: string;
+                  paymentMethod: string | null;
+                  proofSubmittedAt: string | null;
                 }
               | undefined;
 
@@ -784,6 +862,9 @@ adminRechargeRouter.post(
               currentStatus:
                 order.status,
             };
+          }
+          if (order.paymentMethod === 'manual' && !order.proofSubmittedAt) {
+            return { status: 'proof_required' as const };
           }
 
           const user =
@@ -997,6 +1078,11 @@ adminRechargeRouter.post(
             ),
         });
 
+        return;
+      }
+
+      if (result.status === 'proof_required') {
+        res.status(409).json({ error: { message: '人工充值订单必须先提交付款凭证', type: 'proof_required' } });
         return;
       }
 
