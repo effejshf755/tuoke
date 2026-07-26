@@ -73,12 +73,18 @@ describe('Codex pay-as-you-go model pricing', () => {
       model_id: 'gpt-hidden', input_price_per_million: 1,
       output_price_per_million: 2, multiplier: 1, billing_enabled: false,
     });
+    await call(app, 'PUT', '/api/admin/codex/billing', {
+      model_id: 'gpt-disabled-account', input_price_per_million: 3,
+      output_price_per_million: 9, multiplier: 2, billing_enabled: true,
+    });
 
     const response = await call(app, 'GET', '/api/user/codex-models');
     expect(response.status).toBe(200);
-    expect(response.body.models).toEqual([{
-      model_id: 'gpt-visible', input_price_per_million: 2.5,
-      output_price_per_million: 10, multiplier: 1.2,
-    }]);
+    expect(response.body.models).toEqual([
+      { model_id: 'gpt-disabled-account', input_price_per_million: 3,
+        output_price_per_million: 9, multiplier: 2 },
+      { model_id: 'gpt-visible', input_price_per_million: 2.5,
+        output_price_per_million: 10, multiplier: 1.2 },
+    ]);
   });
 });

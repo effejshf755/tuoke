@@ -97,7 +97,7 @@ export function createCodexAccount(
             refresh_token_iv = ?,
             refresh_token_auth_tag = ?,
             token_expires_at = ?,
-            enabled = 1,
+            enabled = 0,
             status = 'unknown',
             last_error = NULL,
             failure_count = 0,
@@ -129,9 +129,10 @@ export function createCodexAccount(
       refresh_token_encrypted,
       refresh_token_iv,
       refresh_token_auth_tag,
-      token_expires_at
+      token_expires_at,
+      enabled
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
   `).run(
     data.label,
     data.account_id ?? null,

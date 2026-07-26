@@ -349,9 +349,10 @@ codexOauthRouter.post('/', (req, res) => {
           refresh_token_encrypted,
           refresh_token_iv,
           refresh_token_auth_tag,
-          token_expires_at
+          token_expires_at,
+          enabled
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
       `)
       .run(
         label,

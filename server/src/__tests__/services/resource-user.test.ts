@@ -75,6 +75,14 @@ describe('resource user queries', () => {
     expect(getPublishedResourceProduct(db, hidden.id)).toBeNull();
   });
 
+  it('keeps the storefront in the same newest-first order as product management', () => {
+    const older = product('older');
+    const newer = product('newer');
+    db.prepare("UPDATE resource_products SET created_at = '2026-07-25 10:00:00' WHERE id = ?").run(older.id);
+    db.prepare("UPDATE resource_products SET created_at = '2026-07-26 10:00:00' WHERE id = ?").run(newer.id);
+    expect((listPublishedResourceProducts(db) as any[]).map(row => row.id)).toEqual([newer.id, older.id]);
+  });
+
   it('isolates orders and subscriptions by the authenticated user without account data', () => {
     const item = product('private-data');
     const firstUserId = user('first@example.com');

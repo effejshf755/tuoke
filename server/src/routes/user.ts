@@ -50,7 +50,7 @@ userRouter.get('/codex-models', (_req, res) => {
       ON b.platform = 'openai-codex'
      AND b.model_id = am.model_id
      AND b.billing_enabled = 1
-    WHERE am.enabled = 1 AND a.enabled = 1
+    WHERE am.enabled = 1
       AND a.resource_scope = 'codex_pool'
       AND am.model_id <> 'codex-auto-review'
     GROUP BY am.model_id

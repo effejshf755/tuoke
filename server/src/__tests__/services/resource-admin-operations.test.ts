@@ -51,6 +51,11 @@ describe('resource admin operations', () => {
       subpoolId = groupPaidResourceOrder(db, order.id).subpoolId;
     }
     const accountId = account('bound');
+    db.prepare(`UPDATE codex_oauth_accounts SET account_id = 'official-bound', plan_type = 'pro',
+      quota_reset_at = '2026-08-01T00:00:00.000Z', quota_synced_at = '2026-07-26T00:00:00.000Z'
+      WHERE id = ?`).run(accountId);
+    db.prepare(`INSERT INTO codex_oauth_account_models (account_id, model_id, enabled)
+      VALUES (?, 'gpt-test', 1)`).run(accountId);
     stageSubpoolCodexAccount(db, subpoolId, accountId, adminId);
     activateSubpool(db, subpoolId, adminId);
     const member = db.prepare(`SELECT id FROM resource_subpool_members WHERE subpool_id = ? ORDER BY id LIMIT 1`).get(subpoolId) as { id: number };
@@ -62,7 +67,12 @@ describe('resource admin operations', () => {
     const freeAccountId = account('available');
     const products = listResourceProductStats(db) as any[];
     expect(products.find((row) => row.id === seeded.productId)).toMatchObject({ orderCount: 4, activeOrderCount: 4, subpoolCount: 1, activeSubpoolCount: 1 });
-    expect(listResourceSubpools(db, 'active')).toHaveLength(1);
+    const subpools = listResourceSubpools(db, 'active') as any[];
+    expect(subpools).toHaveLength(1);
+    expect(subpools[0]).toMatchObject({
+      accountId: seeded.accountId, accountExternalId: 'official-bound', accountEnabled: 1,
+      accountPlanType: 'pro', accountQuotaRemainingPercent: 100, accountModels: 'gpt-test',
+    });
     const detail = getResourceSubpoolDetail(db, seeded.subpoolId)!;
     expect((detail.members as any[])).toHaveLength(4);
     expect((detail.members as any[]).every((member) => Array.isArray(member.apiKeys))).toBe(true);

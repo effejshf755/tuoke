@@ -18,7 +18,7 @@ export function listPublishedResourceProducts(db: Db) {
     WHERE p.status = 'published'
       AND (p.sale_starts_at IS NULL OR datetime(p.sale_starts_at) <= datetime('now'))
       AND (p.sale_ends_at IS NULL OR datetime(p.sale_ends_at) > datetime('now'))
-    ORDER BY p.id DESC`).all();
+    ORDER BY datetime(p.created_at) DESC, p.id DESC`).all();
 }
 
 export function getPublishedResourceProduct(db: Db, productId: number) {

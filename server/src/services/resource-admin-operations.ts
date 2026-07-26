@@ -33,7 +33,11 @@ export function listResourceSubpools(db: Db, status?: string) {
     s.starts_at startsAt, s.ends_at endsAt, s.activated_at activatedAt,
     p.id productId, p.name productName, p.version productVersion,
     COUNT(DISTINCT m.id) memberCount,
-    b.codex_account_id accountId, a.label accountLabel, a.status accountStatus,
+    b.codex_account_id accountId, a.label accountLabel, a.account_id accountExternalId,
+    a.enabled accountEnabled, a.status accountStatus, a.plan_type accountPlanType,
+    a.quota_remaining_percent accountQuotaRemainingPercent,
+    a.quota_reset_at accountQuotaResetAt, a.quota_synced_at accountQuotaSyncedAt,
+    GROUP_CONCAT(DISTINCT am.model_id) accountModels,
     s.pending_codex_account_id pendingAccountId,
     q.allocation_units allocationUnits, q.used_units usedUnits, q.reserved_units reservedUnits
     FROM resource_subpools s
@@ -41,6 +45,7 @@ export function listResourceSubpools(db: Db, status?: string) {
     LEFT JOIN resource_subpool_members m ON m.subpool_id = s.id
     LEFT JOIN resource_subpool_bindings b ON b.subpool_id = s.id AND b.status = 'active'
     LEFT JOIN codex_oauth_accounts a ON a.id = b.codex_account_id
+    LEFT JOIN codex_oauth_account_models am ON am.account_id = a.id AND am.enabled = 1
     LEFT JOIN resource_subpool_quota_periods q ON q.subpool_id = s.id AND q.status = 'active'
     WHERE (? IS NULL OR s.status = ?)
     GROUP BY s.id ORDER BY s.id DESC`).all(status ?? null, status ?? null);
