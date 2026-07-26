@@ -1,12 +1,25 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { getDb, initDb } from '../../db/index.js';
 import { chargeReservedRequest } from '../../services/reserved-billing.js';
+import { calculateBillingAmountMicro } from '../../services/billing.js';
 import { reserveWalletBalance } from '../../services/wallet-reservations.js';
 
 describe('reserved PAYG billing', () => {
   beforeAll(() => {
     process.env.ENCRYPTION_KEY = '1'.repeat(64);
     initDb(':memory:');
+  });
+
+  it('applies the cache multiplier only to cached input tokens', () => {
+    expect(calculateBillingAmountMicro(
+      1_000_000,
+      0,
+      1_000_000,
+      0,
+      2_000,
+      400_000,
+      250,
+    )).toBe(1_400_000);
   });
 
   it('charges only the spendable wallet balance when actual usage costs more', () => {

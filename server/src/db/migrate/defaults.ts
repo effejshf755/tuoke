@@ -53,6 +53,7 @@ import * as resourceCachedPoints from '../migrations/20260725_000044_resource_ca
 import * as resourceQuotaStages from '../migrations/20260726_000045_resource_quota_stages.js';
 import * as resourceQuotaPhases from '../migrations/20260726_000046_resource_quota_phases.js';
 import * as consumerApiKeyCiphertext from '../migrations/20260726_000047_consumer_api_key_ciphertext.js';
+import * as codexCachedBilling from '../migrations/20260726_000048_codex_cached_billing.js';
 
 export interface MigrationModule {
   up(db: Db): void;
@@ -118,6 +119,7 @@ export const RESOURCE_CACHED_POINTS_FILENAME = '20260725_000044_resource_cached_
 export const RESOURCE_QUOTA_STAGES_FILENAME = '20260726_000045_resource_quota_stages.ts';
 export const RESOURCE_QUOTA_PHASES_FILENAME = '20260726_000046_resource_quota_phases.ts';
 export const CONSUMER_API_KEY_CIPHERTEXT_FILENAME = '20260726_000047_consumer_api_key_ciphertext.ts';
+export const CODEX_CACHED_BILLING_FILENAME = '20260726_000048_codex_cached_billing.ts';
 
 export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: LEGACY_BASELINE_FILENAME, module: legacyBaseline },
@@ -174,4 +176,5 @@ export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: RESOURCE_QUOTA_STAGES_FILENAME, module: resourceQuotaStages },
   { filename: RESOURCE_QUOTA_PHASES_FILENAME, module: resourceQuotaPhases },
   { filename: CONSUMER_API_KEY_CIPHERTEXT_FILENAME, module: consumerApiKeyCiphertext },
+  { filename: CODEX_CACHED_BILLING_FILENAME, module: codexCachedBilling },
 ];

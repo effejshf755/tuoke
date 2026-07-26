@@ -43,7 +43,8 @@ userRouter.get('/codex-models', (_req, res) => {
     SELECT am.model_id,
       MIN(b.input_price_micro_per_million) input_price,
       MIN(b.output_price_micro_per_million) output_price,
-      MIN(b.multiplier_milli) multiplier
+      MIN(b.multiplier_milli) multiplier,
+      MIN(b.cached_input_multiplier_milli) cached_input_multiplier
     FROM codex_oauth_account_models am
     JOIN codex_oauth_accounts a ON a.id = am.account_id
     JOIN model_billing_rules b
@@ -67,12 +68,14 @@ userRouter.get('/codex-models', (_req, res) => {
     input_price: number;
     output_price: number;
     multiplier: number;
+    cached_input_multiplier: number;
   }>;
   res.json({ models: rows.map(row => ({
     model_id: row.model_id,
     input_price_per_million: Number((row.input_price / 1_000_000).toFixed(6)),
     output_price_per_million: Number((row.output_price / 1_000_000).toFixed(6)),
     multiplier: Number((row.multiplier / 1_000).toFixed(3)),
+    cached_input_multiplier: Number((row.cached_input_multiplier / 1_000).toFixed(3)),
   })) });
 });
 

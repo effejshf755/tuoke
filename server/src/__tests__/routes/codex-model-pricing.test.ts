@@ -60,37 +60,45 @@ describe('Codex pay-as-you-go model pricing', () => {
     expect(response.body.models.map((item: { model_id: string }) => item.model_id)).toEqual([
       'codex-auto-review', 'gpt-disabled-account', 'gpt-hidden', 'gpt-visible',
     ]);
-    expect(response.body.models[0]).toMatchObject({ total_tokens: 0, last_used_at: null });
+    expect(response.body.models[0]).toMatchObject({
+      cached_input_multiplier: 1,
+      total_tokens: 0,
+      last_used_at: null,
+    });
   });
 
   it('synchronizes enabled pricing to users without exposing hidden or subpool models', async () => {
     const visible = await call(app, 'PUT', '/api/admin/codex/billing', {
       model_id: 'gpt-visible', input_price_per_million: 2.5,
-      output_price_per_million: 10, multiplier: 1.2, billing_enabled: true,
+      output_price_per_million: 10, multiplier: 1.2,
+      cached_input_multiplier: 0.25, billing_enabled: true,
     });
     expect(visible.status).toBe(200);
     await call(app, 'PUT', '/api/admin/codex/billing', {
       model_id: 'gpt-hidden', input_price_per_million: 1,
-      output_price_per_million: 2, multiplier: 1, billing_enabled: false,
+      output_price_per_million: 2, multiplier: 1,
+      cached_input_multiplier: 1, billing_enabled: false,
     });
     await call(app, 'PUT', '/api/admin/codex/billing', {
       model_id: 'gpt-disabled-account', input_price_per_million: 3,
-      output_price_per_million: 9, multiplier: 2, billing_enabled: true,
+      output_price_per_million: 9, multiplier: 2,
+      cached_input_multiplier: 0.5, billing_enabled: true,
     });
     await call(app, 'PUT', '/api/admin/codex/billing', {
       model_id: 'codex-auto-review', input_price_per_million: 0.5,
-      output_price_per_million: 1.5, multiplier: 1.1, billing_enabled: true,
+      output_price_per_million: 1.5, multiplier: 1.1,
+      cached_input_multiplier: 0.1, billing_enabled: true,
     });
 
     const response = await call(app, 'GET', '/api/user/codex-models');
     expect(response.status).toBe(200);
     expect(response.body.models).toEqual([
       { model_id: 'codex-auto-review', input_price_per_million: 0.5,
-        output_price_per_million: 1.5, multiplier: 1.1 },
+        output_price_per_million: 1.5, multiplier: 1.1, cached_input_multiplier: 0.1 },
       { model_id: 'gpt-disabled-account', input_price_per_million: 3,
-        output_price_per_million: 9, multiplier: 2 },
+        output_price_per_million: 9, multiplier: 2, cached_input_multiplier: 0.5 },
       { model_id: 'gpt-visible', input_price_per_million: 2.5,
-        output_price_per_million: 10, multiplier: 1.2 },
+        output_price_per_million: 10, multiplier: 1.2, cached_input_multiplier: 0.25 },
     ]);
   });
 });

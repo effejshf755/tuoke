@@ -5,7 +5,7 @@ import { useMemo, useState } from 'react'
 import { Input } from '@/components/ui/input'
 import { apiFetch } from '@/lib/api'
 
-type CodexModel = { model_id: string; input_price_per_million: number; output_price_per_million: number; multiplier: number }
+type CodexModel = { model_id: string; input_price_per_million: number; output_price_per_million: number; multiplier: number; cached_input_multiplier: number }
 const money = (value: number) => `¥${Number(value || 0).toFixed(6)}`
 
 export default function UserCodexAccountsPage() {
@@ -22,7 +22,7 @@ export default function UserCodexAccountsPage() {
     {query.isLoading ? <p className="py-16 text-center text-sm text-muted-foreground">正在加载模型…</p> : models.length === 0 ? <p className="py-16 text-center text-sm text-muted-foreground">暂无可用 Codex 模型</p> : <div className="mt-6 grid gap-5 lg:grid-cols-2">{models.map(model => <article key={model.model_id} className="flex min-h-56 flex-col rounded-lg border bg-card p-5 sm:p-6">
       <div className="flex items-center gap-3"><span className="flex size-11 shrink-0 items-center justify-center rounded-lg border bg-white p-2"><img src="/provider-logos/openai.svg" alt="Codex" className="size-full object-contain" /></span><div className="min-w-0"><h2 className="truncate font-semibold">{model.model_id}</h2><p className="mt-1 text-xs text-muted-foreground">按量计费</p></div></div>
       <dl className="mt-5 grid grid-cols-2 gap-4 border-y py-4 text-sm"><div><dt className="text-xs text-muted-foreground">输入价格 / 1M Token</dt><dd className="mt-1 font-medium">{money(model.input_price_per_million)}</dd></div><div><dt className="text-xs text-muted-foreground">输出价格 / 1M Token</dt><dd className="mt-1 font-medium">{money(model.output_price_per_million)}</dd></div></dl>
-      <div className="mt-4 flex items-center justify-between text-sm"><span className="text-muted-foreground">计费倍率</span><strong>{model.multiplier.toFixed(3)}×</strong></div>
+      <div className="mt-4 grid grid-cols-2 gap-4 text-sm"><div className="flex items-center justify-between gap-2"><span className="text-muted-foreground">缓存 Token 倍率</span><strong>{model.cached_input_multiplier.toFixed(3)}×</strong></div><div className="flex items-center justify-between gap-2"><span className="text-muted-foreground">计费倍率</span><strong>{model.multiplier.toFixed(3)}×</strong></div></div>
     </article>)}</div>}
   </div>
 }

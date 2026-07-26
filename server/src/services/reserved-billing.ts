@@ -35,6 +35,7 @@ interface RequestRow {
   modelId: string;
   status: string;
   inputTokens: number;
+  cachedInputTokens: number;
   outputTokens: number;
   consumerUserId: number | null;
   billingStatus:
@@ -90,6 +91,7 @@ export function chargeReservedRequest(
               model_id AS modelId,
               status,
               input_tokens AS inputTokens,
+              cached_input_tokens AS cachedInputTokens,
               output_tokens AS outputTokens,
               consumer_user_id AS consumerUserId,
               billing_status AS billingStatus
@@ -210,6 +212,8 @@ export function chargeReservedRequest(
             rule.inputPriceMicroPerMillion,
             rule.outputPriceMicroPerMillion,
             rule.multiplierMilli,
+            request.cachedInputTokens,
+            rule.cachedInputMultiplierMilli,
           );
 
         const wallet =
@@ -384,8 +388,10 @@ export function chargeReservedRequest(
             platform,
             model_id,
             input_tokens,
+            cached_input_tokens,
             output_tokens,
             multiplier_milli,
+            cached_input_multiplier_milli,
             input_price_micro_per_million,
             output_price_micro_per_million,
             note
@@ -393,6 +399,8 @@ export function chargeReservedRequest(
           VALUES (
             ?,
             'usage',
+            ?,
+            ?,
             ?,
             ?,
             ?,
@@ -413,8 +421,10 @@ export function chargeReservedRequest(
           request.platform,
           request.modelId,
           request.inputTokens,
+          request.cachedInputTokens,
           request.outputTokens,
           rule.multiplierMilli,
+          rule.cachedInputMultiplierMilli,
           rule.inputPriceMicroPerMillion,
           rule.outputPriceMicroPerMillion,
           chargedMicro < amountMicro

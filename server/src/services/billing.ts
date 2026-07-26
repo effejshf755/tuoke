@@ -7,6 +7,7 @@ export interface BillingRule {
   inputPriceMicroPerMillion: number;
   outputPriceMicroPerMillion: number;
   multiplierMilli: number;
+  cachedInputMultiplierMilli: number;
   billingEnabled: 0 | 1;
 }
 
@@ -43,6 +44,7 @@ interface RequestBillingRow {
   modelId: string;
   status: string;
   inputTokens: number;
+  cachedInputTokens: number;
   outputTokens: number;
   consumerUserId: number | null;
   billingAmountMicro: number;
@@ -84,6 +86,8 @@ export function getModelBillingRule(
         AS outputPriceMicroPerMillion,
       multiplier_milli
         AS multiplierMilli,
+      cached_input_multiplier_milli
+        AS cachedInputMultiplierMilli,
       billing_enabled
         AS billingEnabled
     FROM model_billing_rules
@@ -121,6 +125,8 @@ export function calculateBillingAmountMicro(
   inputPriceMicroPerMillion: number,
   outputPriceMicroPerMillion: number,
   multiplierMilli: number,
+  cachedInputTokens = 0,
+  cachedInputMultiplierMilli = 1_000,
 ): number {
   const safeInputTokens =
     Math.max(
@@ -132,6 +138,12 @@ export function calculateBillingAmountMicro(
     Math.max(
       0,
       Math.trunc(outputTokens),
+    );
+
+  const safeCachedInputTokens =
+    Math.min(
+      safeInputTokens,
+      Math.max(0, Math.trunc(cachedInputTokens)),
     );
 
   const safeInputPrice =
@@ -156,15 +168,22 @@ export function calculateBillingAmountMicro(
       Math.trunc(multiplierMilli),
     );
 
-  const raw =
-    BigInt(safeInputTokens) *
+  const safeCachedMultiplier =
+    Math.max(0, Math.trunc(cachedInputMultiplierMilli));
+
+  const regularRaw =
+    BigInt(safeInputTokens - safeCachedInputTokens) *
       BigInt(safeInputPrice)
     +
     BigInt(safeOutputTokens) *
       BigInt(safeOutputPrice);
 
+  const cachedRaw =
+    BigInt(safeCachedInputTokens) *
+      BigInt(safeInputPrice);
+
   if (
-    raw === 0n ||
+    (regularRaw === 0n && cachedRaw === 0n) ||
     safeMultiplier === 0
   ) {
     return 0;
@@ -182,11 +201,16 @@ export function calculateBillingAmountMicro(
    * = 1,000,000,000
    */
   const numerator =
-    raw *
-    BigInt(safeMultiplier);
+    regularRaw *
+      BigInt(safeMultiplier) *
+      1_000n
+    +
+    cachedRaw *
+      BigInt(safeMultiplier) *
+      BigInt(safeCachedMultiplier);
 
   const denominator =
-    1_000_000_000n;
+    1_000_000_000_000n;
 
   const roundedUp =
     (
@@ -238,6 +262,7 @@ export function chargeRequest(
               model_id AS modelId,
               status,
               input_tokens AS inputTokens,
+              cached_input_tokens AS cachedInputTokens,
               output_tokens AS outputTokens,
               consumer_user_id
                 AS consumerUserId,
@@ -356,6 +381,8 @@ export function chargeRequest(
             rule.inputPriceMicroPerMillion,
             rule.outputPriceMicroPerMillion,
             rule.multiplierMilli,
+            request.cachedInputTokens,
+            rule.cachedInputMultiplierMilli,
           );
 
         const wallet =
@@ -464,8 +491,10 @@ export function chargeRequest(
             platform,
             model_id,
             input_tokens,
+            cached_input_tokens,
             output_tokens,
             multiplier_milli,
+            cached_input_multiplier_milli,
             input_price_micro_per_million,
             output_price_micro_per_million,
             note
@@ -473,6 +502,8 @@ export function chargeRequest(
           VALUES (
             ?,
             'usage',
+            ?,
+            ?,
             ?,
             ?,
             ?,
@@ -493,8 +524,10 @@ export function chargeRequest(
           request.platform,
           request.modelId,
           request.inputTokens,
+          request.cachedInputTokens,
           request.outputTokens,
           rule.multiplierMilli,
+          rule.cachedInputMultiplierMilli,
           rule.inputPriceMicroPerMillion,
           rule.outputPriceMicroPerMillion,
           'API usage charge',

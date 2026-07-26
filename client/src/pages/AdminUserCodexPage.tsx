@@ -15,12 +15,13 @@ type CodexModel = {
   input_price_per_million: number
   output_price_per_million: number
   multiplier: number
+  cached_input_multiplier: number
   billing_enabled: boolean
   total_tokens: number
   last_used_at: string | null
 }
 
-type Draft = Pick<CodexModel, 'input_price_per_million' | 'output_price_per_million' | 'multiplier' | 'billing_enabled'>
+type Draft = Pick<CodexModel, 'input_price_per_million' | 'output_price_per_million' | 'multiplier' | 'cached_input_multiplier' | 'billing_enabled'>
 
 function formatTokenCount(value: number): string {
   const amount = Math.max(0, Number(value || 0))
@@ -54,6 +55,7 @@ export default function AdminUserCodexPage() {
       input_price_per_million: model.input_price_per_million,
       output_price_per_million: model.output_price_per_million,
       multiplier: model.multiplier,
+      cached_input_multiplier: model.cached_input_multiplier,
       billing_enabled: model.billing_enabled,
     }])))
   }, [query.data])
@@ -90,8 +92,8 @@ export default function AdminUserCodexPage() {
       return <article key={model.model_id} className="flex min-h-72 flex-col rounded-lg border bg-card p-5 sm:p-6">
         <div className="flex items-start justify-between gap-3"><div className="flex min-w-0 items-center gap-3"><span className="flex size-11 shrink-0 items-center justify-center rounded-lg border bg-white p-2"><img src="/provider-logos/openai.svg" alt="Codex" className="size-full object-contain" /></span><div className="min-w-0"><h2 className="truncate text-base font-semibold">{model.model_id}</h2><p className="mt-1 text-xs text-muted-foreground">账号池模型</p></div></div><label className="flex shrink-0 items-center gap-2 text-xs">展示<Switch checked={draft.billing_enabled} onCheckedChange={checked => update(model.model_id, { billing_enabled: checked })} /></label></div>
         <dl className="mt-5 grid grid-cols-2 gap-5 border-y py-4 text-sm"><div><dt className="text-xs text-muted-foreground">真实消耗</dt><dd className="mt-1 text-lg font-semibold" title={`${new Intl.NumberFormat('zh-CN').format(model.total_tokens)} Token`}>{formatTokenCount(model.total_tokens)} Token</dd></div><div><dt className="text-xs text-muted-foreground">计费方式</dt><dd className="mt-1 font-medium">按 Token</dd><p className="mt-1 text-xs text-muted-foreground">每 5 秒刷新</p></div></dl>
-        <div className="mt-5 grid gap-4 sm:grid-cols-2"><PriceField label="输入价 / 1M Token" value={draft.input_price_per_million} onChange={value => update(model.model_id, { input_price_per_million: value })} /><PriceField label="输出价 / 1M Token" value={draft.output_price_per_million} onChange={value => update(model.model_id, { output_price_per_million: value })} /></div>
-        <div className="mt-auto grid items-end gap-4 pt-4 sm:grid-cols-[minmax(0,1fr)_9rem]"><PriceField label="计费倍率" value={draft.multiplier} step="0.001" onChange={value => update(model.model_id, { multiplier: value })} /><Button variant="outline" disabled={save.isPending} onClick={() => save.mutate({ modelId: model.model_id, draft })}><Save />保存</Button></div>
+        <div className="mt-5 grid gap-4 sm:grid-cols-2"><PriceField label="输入价 / 1M Token" value={draft.input_price_per_million} onChange={value => update(model.model_id, { input_price_per_million: value })} /><PriceField label="输出价 / 1M Token" value={draft.output_price_per_million} onChange={value => update(model.model_id, { output_price_per_million: value })} /><PriceField label="缓存 Token 倍率" value={draft.cached_input_multiplier} step="0.001" onChange={value => update(model.model_id, { cached_input_multiplier: value })} /><PriceField label="计费倍率" value={draft.multiplier} step="0.001" onChange={value => update(model.model_id, { multiplier: value })} /></div>
+        <Button className="mt-auto w-full" variant="outline" disabled={save.isPending} onClick={() => save.mutate({ modelId: model.model_id, draft })}><Save />保存</Button>
       </article>
     })}</div>}
   </div>

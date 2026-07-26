@@ -83,9 +83,9 @@ export function logRequest(
     const loggedOutputTokens = hasProviderUsage ? codexTokens!.outputTokens : outputTokens;
     const tx = db.transaction(() => {
       const insert = db.prepare(`
-        INSERT INTO requests (platform, model_id, key_id, status, input_tokens, output_tokens, latency_ms, error, ttfb_ms, requested_model, client_ip, client_user_agent, consumer_user_id, consumer_api_key_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(platform, modelId, keyId, status, loggedInputTokens, loggedOutputTokens, latencyMs, error, ttfbMs, requestedModel, client.ip, client.userAgent, client.consumerUserId, client.consumerApiKeyId);
+        INSERT INTO requests (platform, model_id, key_id, status, input_tokens, cached_input_tokens, output_tokens, latency_ms, error, ttfb_ms, requested_model, client_ip, client_user_agent, consumer_user_id, consumer_api_key_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(platform, modelId, keyId, status, loggedInputTokens, loggedCachedInputTokens, loggedOutputTokens, latencyMs, error, ttfbMs, requestedModel, client.ip, client.userAgent, client.consumerUserId, client.consumerApiKeyId);
 
       const createdAt = db.prepare(`SELECT created_at FROM requests WHERE id = ?`).get(insert.lastInsertRowid) as { created_at: string } | undefined;
       const hour = hourKey(createdAt?.created_at ?? new Date().toISOString().slice(0, 19).replace('T', ' '));

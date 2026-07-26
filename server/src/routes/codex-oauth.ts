@@ -27,6 +27,7 @@ const updateCodexBillingSchema = z.object({
   input_price_per_million: z.number().finite().min(0).max(1_000_000),
   output_price_per_million: z.number().finite().min(0).max(1_000_000),
   multiplier: z.number().finite().min(0).max(1_000),
+  cached_input_multiplier: z.number().finite().min(0).max(1_000),
   billing_enabled: z.boolean(),
 }).strict();
 
@@ -56,6 +57,7 @@ codexOauthRouter.get('/billing', (_req, res) => {
       COALESCE(b.input_price_micro_per_million, 0) AS input_price,
       COALESCE(b.output_price_micro_per_million, 0) AS output_price,
       COALESCE(b.multiplier_milli, 1000) AS multiplier,
+      COALESCE(b.cached_input_multiplier_milli, 1000) AS cached_input_multiplier,
       COALESCE(b.billing_enabled, 1) AS billing_enabled,
       COALESCE(usage.total_tokens, 0) AS total_tokens,
       usage.last_used_at
@@ -87,6 +89,7 @@ codexOauthRouter.get('/billing', (_req, res) => {
     input_price: number;
     output_price: number;
     multiplier: number;
+    cached_input_multiplier: number;
     billing_enabled: number;
     total_tokens: number;
     last_used_at: string | null;
@@ -100,6 +103,7 @@ codexOauthRouter.get('/billing', (_req, res) => {
       input_price_per_million: microToCurrency(row.input_price),
       output_price_per_million: microToCurrency(row.output_price),
       multiplier: milliToMultiplier(row.multiplier),
+      cached_input_multiplier: milliToMultiplier(row.cached_input_multiplier),
       billing_enabled: Boolean(row.billing_enabled),
       total_tokens: Number(row.total_tokens || 0),
       last_used_at: row.last_used_at,
@@ -137,12 +141,14 @@ codexOauthRouter.put('/billing', (req, res) => {
       input_price_micro_per_million,
       output_price_micro_per_million,
       multiplier_milli,
+      cached_input_multiplier_milli,
       billing_enabled
-    ) VALUES ('openai-codex', ?, ?, ?, ?, ?)
+    ) VALUES ('openai-codex', ?, ?, ?, ?, ?, ?)
     ON CONFLICT(platform, model_id) DO UPDATE SET
       input_price_micro_per_million = excluded.input_price_micro_per_million,
       output_price_micro_per_million = excluded.output_price_micro_per_million,
       multiplier_milli = excluded.multiplier_milli,
+      cached_input_multiplier_milli = excluded.cached_input_multiplier_milli,
       billing_enabled = excluded.billing_enabled,
       updated_at = datetime('now')
   `).run(
@@ -150,6 +156,7 @@ codexOauthRouter.put('/billing', (req, res) => {
     currencyToMicro(parsed.data.input_price_per_million),
     currencyToMicro(parsed.data.output_price_per_million),
     Math.round(parsed.data.multiplier * 1_000),
+    Math.round(parsed.data.cached_input_multiplier * 1_000),
     parsed.data.billing_enabled ? 1 : 0,
   );
 
