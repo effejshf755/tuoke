@@ -70,7 +70,6 @@ codexOauthRouter.get('/billing', (_req, res) => {
       GROUP BY model_id
     ) usage ON usage.model_id = am.model_id
     WHERE a.resource_scope = 'codex_pool'
-      AND am.model_id <> 'codex-auto-review'
     GROUP BY am.model_id
     ORDER BY CASE am.model_id
       WHEN 'gpt-5.6-sol' THEN 1

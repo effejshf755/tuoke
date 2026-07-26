@@ -3,7 +3,7 @@ import type { Db } from '../db/types.js';
 export const FREE_DAILY_LIMIT = 50;
 export const RECHARGED_DAILY_LIMIT = 1000;
 export const FREE_TIER_RECHARGE_THRESHOLD_MICRO = 10_000_000;
-export const PAID_MODEL_MINIMUM_BALANCE_MICRO = 1_000_000;
+export const PAID_MODEL_MINIMUM_BALANCE_MICRO = 100_000;
 
 export function isExplicitFreeModel(db: Db, requestedModel: string | null): boolean {
   if (!requestedModel || requestedModel === 'auto' || requestedModel.startsWith('auto:')) {

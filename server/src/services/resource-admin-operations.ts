@@ -89,7 +89,7 @@ export function getResourceSubpoolDetail(db: Db, subpoolId: number) {
     FROM resource_member_api_keys mk
     JOIN consumer_api_keys k ON k.id = mk.consumer_api_key_id
     JOIN resource_subpool_members m ON m.id = mk.member_id
-    WHERE m.subpool_id = ?
+    WHERE m.subpool_id = ? AND k.status = 'active'
     ORDER BY mk.member_id, k.id`).all(subpoolId) as Array<Record<string, unknown> & { memberId: number }>;
   return {
     pool,

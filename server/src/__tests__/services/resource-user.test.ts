@@ -102,8 +102,11 @@ describe('resource user queries', () => {
     expect(listUserResourceSubscriptions(db, user('outsider@example.com'))).toEqual([]);
     const detail = getUserResourceSubscriptionDetail(db, firstUserId, subpoolId)!;
     expect(detail.members).toHaveLength(2);
-    expect(detail.members.some((member: any) => member.label === '我' && member.isCurrentUser)).toBe(true);
-    expect(JSON.stringify(detail)).not.toMatch(/private-account|first@example|second@example|accountId|oauth|secret/i);
+    expect(detail.members).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: 'first@example.com', email: 'first@example.com', isCurrentUser: true }),
+      expect.objectContaining({ label: 'second@example.com', email: 'second@example.com', isCurrentUser: false }),
+    ]));
+    expect(JSON.stringify(detail)).not.toMatch(/private-account|accountId|oauth|secret/i);
     expect(getUserResourceSubscriptionDetail(db, user('detail-outsider@example.com'), subpoolId)).toBeNull();
   });
 

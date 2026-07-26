@@ -2,6 +2,8 @@ import type { Db } from '../db/types.js';
 import { decryptCodexToken } from './codex-token.js';
 import { discoverCodexModels, replaceCodexAccountModels } from './codex-model-discovery.js';
 import { proxyFetch } from '../lib/proxy.js';
+import { getDb } from '../db/index.js';
+import type { Scheduler } from '../lib/scheduler.js';
 
 const CODEX_USAGE_ENDPOINT = 'https://chatgpt.com/backend-api/wham/usage';
 
@@ -299,4 +301,65 @@ export async function checkCodexAccountHealth(db: Db, id: number): Promise<Codex
   }
 
   return listCodexAccounts(db).find(accountRow => accountRow.id === id)!;
+}
+
+export async function syncEnabledCodexAccountQuotas(
+  db: Db,
+  check: (db: Db, id: number) => Promise<unknown> = syncCodexAccountQuotaOnly,
+): Promise<number> {
+  const accounts = db.prepare(`
+    SELECT id FROM codex_oauth_accounts
+    WHERE enabled = 1 AND deleted_at IS NULL
+    ORDER BY id
+  `).all() as Array<{ id: number }>;
+  for (const account of accounts) {
+    try {
+      await check(db, account.id);
+    } catch (error) {
+      console.error(`[codex-quota-sync] account ${account.id} failed:`, error instanceof Error ? error.message : error);
+    }
+  }
+  return accounts.length;
+}
+
+async function syncCodexAccountQuotaOnly(db: Db, id: number): Promise<void> {
+  const account = db.prepare(`
+    SELECT account_id, access_token_encrypted, access_token_iv, access_token_auth_tag
+    FROM codex_oauth_accounts
+    WHERE id = ? AND enabled = 1 AND deleted_at IS NULL
+  `).get(id) as {
+    account_id: string | null;
+    access_token_encrypted: string;
+    access_token_iv: string;
+    access_token_auth_tag: string;
+  } | undefined;
+  if (!account) return;
+  const accessToken = decryptCodexToken(
+    account.access_token_encrypted,
+    account.access_token_iv,
+    account.access_token_auth_tag,
+  );
+  await syncCodexAccountQuota(db, id, accessToken, account.account_id);
+}
+
+const CODEX_QUOTA_SYNC_INTERVAL_MS = 60_000;
+let codexQuotaSyncStarted = false;
+
+export function startCodexAccountQuotaSync(scheduler: Scheduler): void {
+  if (codexQuotaSyncStarted) return;
+  codexQuotaSyncStarted = true;
+  let running = false;
+  const run = async () => {
+    if (running) return;
+    running = true;
+    try {
+      await syncEnabledCodexAccountQuotas(getDb());
+    } catch (error) {
+      console.error('[codex-quota-sync] failed:', error instanceof Error ? error.message : error);
+    } finally {
+      running = false;
+    }
+  };
+  void run();
+  scheduler.every(CODEX_QUOTA_SYNC_INTERVAL_MS, run, { name: 'codex-account-quota-sync' });
 }

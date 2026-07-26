@@ -52,7 +52,6 @@ userRouter.get('/codex-models', (_req, res) => {
      AND b.billing_enabled = 1
     WHERE am.enabled = 1
       AND a.resource_scope = 'codex_pool'
-      AND am.model_id <> 'codex-auto-review'
     GROUP BY am.model_id
     ORDER BY CASE am.model_id
       WHEN 'gpt-5.6-sol' THEN 1

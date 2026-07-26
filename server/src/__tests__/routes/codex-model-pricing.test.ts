@@ -58,7 +58,7 @@ describe('Codex pay-as-you-go model pricing', () => {
     const response = await call(app, 'GET', '/api/admin/codex/billing');
     expect(response.status).toBe(200);
     expect(response.body.models.map((item: { model_id: string }) => item.model_id)).toEqual([
-      'gpt-disabled-account', 'gpt-hidden', 'gpt-visible',
+      'codex-auto-review', 'gpt-disabled-account', 'gpt-hidden', 'gpt-visible',
     ]);
     expect(response.body.models[0]).toMatchObject({ total_tokens: 0, last_used_at: null });
   });
@@ -77,10 +77,16 @@ describe('Codex pay-as-you-go model pricing', () => {
       model_id: 'gpt-disabled-account', input_price_per_million: 3,
       output_price_per_million: 9, multiplier: 2, billing_enabled: true,
     });
+    await call(app, 'PUT', '/api/admin/codex/billing', {
+      model_id: 'codex-auto-review', input_price_per_million: 0.5,
+      output_price_per_million: 1.5, multiplier: 1.1, billing_enabled: true,
+    });
 
     const response = await call(app, 'GET', '/api/user/codex-models');
     expect(response.status).toBe(200);
     expect(response.body.models).toEqual([
+      { model_id: 'codex-auto-review', input_price_per_million: 0.5,
+        output_price_per_million: 1.5, multiplier: 1.1 },
       { model_id: 'gpt-disabled-account', input_price_per_million: 3,
         output_price_per_million: 9, multiplier: 2 },
       { model_id: 'gpt-visible', input_price_per_million: 2.5,

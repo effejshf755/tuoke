@@ -58,6 +58,7 @@ const CURRENT_MIGRATIONS_AFTER_KEYS = [
   '20260725_000044_resource_cached_points.ts',
   '20260726_000045_resource_quota_stages.ts',
   '20260726_000046_resource_quota_phases.ts',
+  '20260726_000047_consumer_api_key_ciphertext.ts',
 ];
 
 interface SchemaRow {

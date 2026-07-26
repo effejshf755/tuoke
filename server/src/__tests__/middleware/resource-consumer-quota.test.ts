@@ -4,6 +4,7 @@ import { getDb, initDb } from '../../db/index.js';
 import { clientContextMiddleware, setConsumerIdentity } from '../../lib/client-context.js';
 import { consumerQuota } from '../../middleware/consumerQuota.js';
 import { createConsumerApiKey } from '../../services/consumer-api-keys.js';
+import { PAID_MODEL_MINIMUM_BALANCE_MICRO } from '../../services/free-model-access.js';
 import { resolveModelGroupCandidates, routePinnedModel, routeRequest } from '../../services/router.js';
 
 class TestResponse extends EventEmitter {
@@ -71,6 +72,51 @@ describe('Codex resource consumer quota', () => {
       WHERE subpool_id = ? AND status = 'reserved'`).get(subpoolId) as { count: number }).count).toBe(1);
     expect((db.prepare(`SELECT COUNT(*) count FROM wallet_reservations WHERE user_id = ?`).get(userId) as { count: number }).count).toBe(0);
     expect((db.prepare(`SELECT balance_micro balance FROM users WHERE id = ?`).get(userId) as { balance: number }).balance).toBe(0);
+  });
+
+  it('admits PAYG requests at 0.1 yuan with a fixed reservation regardless of context size', () => {
+    const db = getDb();
+    const model = { modelId: 'payg-fixed-reservation-test' };
+    db.prepare(`INSERT INTO models (
+      platform, model_id, display_name, intelligence_rank, speed_rank,
+      size_label, monthly_token_budget, enabled, supports_tools
+    ) VALUES ('groq', ?, ?, 50, 50, '', '', 1, 1)`).run(model.modelId, model.modelId);
+    db.prepare(`INSERT INTO model_billing_rules
+      (platform, model_id, input_price_micro_per_million, output_price_micro_per_million,
+       multiplier_milli, billing_enabled)
+      VALUES ('groq', ?, 1000000, 1000000, 1000, 1)`).run(model.modelId);
+
+    const callGate = (email: string, balanceMicro: number) => {
+      const userId = Number(db.prepare(`INSERT INTO users (email, password_hash, balance_micro)
+        VALUES (?, 'x', ?)`).run(email, balanceMicro).lastInsertRowid);
+      const key = createConsumerApiKey(db, userId, 'PAYG threshold', null, 'universal');
+      const req = {
+        method: 'POST', path: '/chat/completions',
+        headers: { authorization: `Bearer ${key.key}` },
+        body: {
+          model: model.modelId,
+          messages: [{ role: 'user', content: 'x'.repeat(500_000) }],
+          max_tokens: 100_000,
+        },
+        socket: { remoteAddress: '127.0.0.1' },
+      } as any;
+      const res = new TestResponse() as any;
+      let continued = false;
+      clientContextMiddleware(req, res, () => consumerQuota(req, res, () => { continued = true; }));
+      return { continued, res, userId };
+    };
+
+    const below = callGate('payg-below-threshold@example.com', PAID_MODEL_MINIMUM_BALANCE_MICRO - 1);
+    expect(below.continued).toBe(false);
+    expect(below.res.statusCode).toBe(402);
+    expect((below.res.body as any).error.minimum_balance_micro).toBe(100_000);
+
+    const atThreshold = callGate('payg-at-threshold@example.com', PAID_MODEL_MINIMUM_BALANCE_MICRO);
+    expect(atThreshold.continued).toBe(true);
+    expect(atThreshold.res.statusCode).toBe(200);
+    const reservation = db.prepare(`SELECT reserved_micro reservedMicro FROM wallet_reservations
+      WHERE user_id = ? AND status = 'reserved'`).get(atThreshold.userId) as { reservedMicro: number };
+    expect(reservation.reservedMicro).toBe(PAID_MODEL_MINIMUM_BALANCE_MICRO);
   });
 
   it('enforces all three key scopes and keeps ordinary Codex and resource accounts separate', () => {

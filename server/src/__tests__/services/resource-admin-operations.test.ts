@@ -84,6 +84,26 @@ describe('resource admin operations', () => {
     expect(accounts.some((row) => row.id === freeAccountId)).toBe(true);
   });
 
+  it('excludes revoked member API keys from administrator subpool details', () => {
+    const seeded = activePool();
+    const member = db.prepare(`SELECT user_id userId FROM resource_subpool_members WHERE id = ?`).get(seeded.memberId) as { userId: number };
+    const insertKey = db.prepare(`
+      INSERT INTO consumer_api_keys (user_id, name, key_prefix, key_hash, status, enabled, key_type, key_scope)
+      VALUES (?, ?, ?, ?, ?, ?, 'codex_pool', 'resource_subpool')
+    `);
+    const revokedId = Number(insertKey.run(member.userId, 'Old key', 'tuoke-old', 'old-hash', 'revoked', 0).lastInsertRowid);
+    const activeId = Number(insertKey.run(member.userId, 'Current key', 'tuoke-current', 'current-hash', 'active', 1).lastInsertRowid);
+    const linkKey = db.prepare('INSERT INTO resource_member_api_keys (member_id, consumer_api_key_id) VALUES (?, ?)');
+    linkKey.run(seeded.memberId, revokedId);
+    linkKey.run(seeded.memberId, activeId);
+
+    const detail = getResourceSubpoolDetail(db, seeded.subpoolId)!;
+    const detailMember = (detail.members as any[]).find((row) => row.id === seeded.memberId);
+    expect(detailMember.apiKeys).toEqual([
+      expect.objectContaining({ id: activeId, name: 'Current key', status: 'active' }),
+    ]);
+  });
+
   it('adjusts member quota with a ledger row and audit record in one transaction', () => {
     const seeded = activePool();
     const adjusted = adjustResourceMemberQuota(db, {

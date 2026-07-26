@@ -299,7 +299,7 @@ export function consumerQuota(
   if (availableMicro === null || availableMicro < PAID_MODEL_MINIMUM_BALANCE_MICRO) {
     res.status(402).json({
       error: {
-        message: 'Paid models require an available balance of at least 1 yuan.',
+        message: 'Paid models require an available balance of at least 0.1 yuan.',
         type: 'minimum_balance_required',
         minimum_balance_micro: PAID_MODEL_MINIMUM_BALANCE_MICRO,
         available_micro: availableMicro ?? 0,
@@ -324,7 +324,7 @@ export function consumerQuota(
 
       estimate.requestedModel,
 
-      estimate.reserveMicro,
+      PAID_MODEL_MINIMUM_BALANCE_MICRO,
     );
 
   if (
@@ -334,13 +334,13 @@ export function consumerQuota(
     res.status(402).json({
       error: {
         message:
-          'Insufficient prepaid balance for this request.',
+          'Paid models require an available balance of at least 0.1 yuan.',
 
         type:
           'insufficient_balance',
 
         required_micro:
-          estimate.reserveMicro,
+          PAID_MODEL_MINIMUM_BALANCE_MICRO,
 
         available_micro:
           reservation.availableMicro,

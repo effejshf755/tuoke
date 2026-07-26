@@ -5,6 +5,7 @@ import { getDb } from '../db/index.js';
 
 import {
   createConsumerApiKey,
+  getConsumerApiKeySecret,
   listConsumerApiKeys,
   revokeConsumerApiKey,
   setConsumerApiKeyEnabled,
@@ -421,5 +422,33 @@ consumerApiKeysRouter.delete(
   success: true,
   message: 'API key revoked successfully',
 });
+  },
+);
+
+consumerApiKeysRouter.get(
+  '/:id/secret',
+  (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: { message: 'Invalid API key id', type: 'validation_error' } });
+      return;
+    }
+
+    const result = getConsumerApiKeySecret(getDb(), id, getUserId(req));
+    if (result.status === 'not_found') {
+      res.status(404).json({ error: { message: 'Consumer API key not found', type: 'not_found' } });
+      return;
+    }
+    if (result.status === 'not_recoverable') {
+      res.status(409).json({
+        error: {
+          message: '旧密钥未保存可恢复副本，请撤销后重新创建。',
+          type: 'consumer_key_not_recoverable',
+        },
+      });
+      return;
+    }
+
+    res.json({ key: result.key });
   },
 );

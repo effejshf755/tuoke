@@ -74,6 +74,7 @@ const PRODUCT_POINTS_WAN: Record<string, string> = {
   'codex-pro-x5': '25',
 }
 const GROUP_OPTIONS = [5, 4, 3, 2] as const
+const DEFAULT_PRODUCT_DESCRIPTION = '本套餐的总权益积分由所有拼单成员平均分配。例如：商品共有 100 万积分，5 人拼单成功后，每人可获得 20 万积分。每位成员的积分独立计算，其他成员的使用不会扣除你的积分。使用 Codex 时，系统会根据实际 Token 消耗和所选模型倍率扣除个人积分；个人积分用完后，将暂停使用至积分恢复。'
 const statusLabel: Record<Product['status'], string> = {
   draft: '草稿', published: '已发布', unpublished: '已下架', archived: '已归档',
 }
@@ -96,8 +97,8 @@ function statusTone(status: Product['status']) {
   return 'border-border bg-muted/40 text-muted-foreground'
 }
 
-function toForm(product?: Product | null): ProductForm {
-  if (!product) return { ...emptyForm }
+function toForm(product?: Product | null, initialDescription = ''): ProductForm {
+  if (!product) return { ...emptyForm, description: initialDescription || DEFAULT_PRODUCT_DESCRIPTION }
   return {
     productKey: product.productKey,
     name: product.name,
@@ -135,14 +136,15 @@ function payload(form: ProductForm, includeKey: boolean) {
   }
 }
 
-function ProductEditor({ open, source, mode, onOpenChange, onSaved }: {
+function ProductEditor({ open, source, mode, initialDescription = '', onOpenChange, onSaved }: {
   open: boolean
   source: Product | null
   mode: 'create' | 'edit' | 'version'
+  initialDescription?: string
   onOpenChange: (open: boolean) => void
   onSaved: () => void
 }) {
-  const [form, setForm] = useState<ProductForm>(() => toForm(source))
+  const [form, setForm] = useState<ProductForm>(() => toForm(source, initialDescription))
   const hasSource = source !== null
   const save = useMutation({
     mutationFn: () => apiFetch(mode === 'version'
@@ -327,6 +329,10 @@ export function AdminResourceProductsPage() {
   const rows = [...(query.data?.products ?? [])].sort((left, right) =>
     statusPriority[left.status] - statusPriority[right.status]
     || new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
+  const latestPublishedDescription = [...(query.data?.products ?? [])]
+    .filter(product => product.status === 'published' && product.description?.trim())
+    .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())[0]
+    ?.description?.trim() || DEFAULT_PRODUCT_DESCRIPTION
 
   return <div className="mx-auto w-full max-w-7xl">
     <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
@@ -353,7 +359,7 @@ export function AdminResourceProductsPage() {
         </article>})}
       </div>}
     </div>
-    <ProductEditor key={editor.key} open={editor.open} source={editor.source} mode={editor.mode} onOpenChange={open => setEditor(current => ({ ...current, open }))} onSaved={refresh} />
+    <ProductEditor key={editor.key} open={editor.open} source={editor.source} mode={editor.mode} initialDescription={latestPublishedDescription} onOpenChange={open => setEditor(current => ({ ...current, open }))} onSaved={refresh} />
     <PointsPolicyDialog open={policyOpen} onOpenChange={setPolicyOpen} />
     <ProductDetail product={detail} open={detail !== null} onOpenChange={open => { if (!open) setDetail(null) }} onEdit={product => { setDetail(null); setEditor(current => ({ open: true, source: product, mode: 'edit', key: current.key + 1 })) }} />
   </div>

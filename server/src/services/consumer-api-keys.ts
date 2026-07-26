@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import type { Db } from '../db/types.js';
+import { decrypt, encrypt, initEncryptionKey, isEncryptionKeyInitialized } from '../lib/crypto.js';
 import { bindNewCodexPoolKey } from './resource-member-key.js';
 
 const KEY_PREFIX = 'tuoke-';
@@ -35,6 +36,11 @@ export interface CreatedConsumerApiKey {
   key: string;
   record: ConsumerApiKey;
 }
+
+export type ConsumerApiKeySecretResult =
+  | { status: 'ok'; key: string }
+  | { status: 'not_found' }
+  | { status: 'not_recoverable' };
 
 interface StoredKey {
   id: number;
@@ -349,6 +355,11 @@ export function createConsumerApiKey(
       KEY_PREFIX.length + 8,
     );
 
+  if (!isEncryptionKeyInitialized()) {
+    initEncryptionKey(db);
+  }
+  const encryptedKey = encrypt(key);
+
   const result = db
     .prepare(`
       INSERT INTO
@@ -358,6 +369,9 @@ export function createConsumerApiKey(
           name,
           key_prefix,
           key_hash,
+          key_encrypted,
+          key_iv,
+          key_auth_tag,
           expires_at,
           enabled,
           key_type,
@@ -365,6 +379,9 @@ export function createConsumerApiKey(
         )
 
       VALUES (
+        ?,
+        ?,
+        ?,
         ?,
         ?,
         ?,
@@ -380,6 +397,9 @@ export function createConsumerApiKey(
       name,
       keyPrefix,
       hashKey(key),
+      encryptedKey.encrypted,
+      encryptedKey.iv,
+      encryptedKey.authTag,
       expiresAt ?? null,
       keyType === 'resource_subpool' ? 'codex_pool' : keyType,
       keyType,
@@ -439,6 +459,24 @@ export function createConsumerApiKey(
     record:
       toRecord(row),
   };
+}
+
+export function getConsumerApiKeySecret(
+  db: Db,
+  id: number,
+  userId: number,
+): ConsumerApiKeySecretResult {
+  const row = db.prepare(`
+    SELECT key_encrypted AS encrypted, key_iv AS iv, key_auth_tag AS authTag
+    FROM consumer_api_keys
+    WHERE id = ? AND user_id = ?
+  `).get(id, userId) as { encrypted: string | null; iv: string | null; authTag: string | null } | undefined;
+
+  if (!row) return { status: 'not_found' };
+  if (!row.encrypted || !row.iv || !row.authTag) return { status: 'not_recoverable' };
+  if (!isEncryptionKeyInitialized()) initEncryptionKey(db);
+
+  return { status: 'ok', key: decrypt(row.encrypted, row.iv, row.authTag) };
 }
 
 /**

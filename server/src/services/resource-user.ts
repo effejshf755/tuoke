@@ -121,15 +121,16 @@ export function getUserResourceSubscriptionDetail(db: Db, userId: number, subpoo
     LEFT JOIN codex_oauth_accounts a ON a.id = b.codex_account_id
     WHERE m.user_id = ? AND m.subpool_id = ? AND m.status = 'active'`).get(userId, subpoolId) as Record<string, unknown> | undefined;
   if (!subscription) return null;
-  const members = db.prepare(`SELECT m.id, m.user_id userId,
+  const members = db.prepare(`SELECT m.id, m.user_id userId, u.email,
     q.allocation_units allocationUnits, q.used_units usedUnits, q.reserved_units reservedUnits,
     MAX(0, q.allocation_units - q.used_units - q.reserved_units) remainingUnits
     FROM resource_subpool_members m
+    JOIN users u ON u.id = m.user_id
     LEFT JOIN resource_subpool_quota_periods period ON period.subpool_id = m.subpool_id AND period.status = 'active'
     LEFT JOIN resource_member_quotas q ON q.subpool_period_id = period.id AND q.member_id = m.id
-    WHERE m.subpool_id = ? AND m.status IN ('active', 'suspended') ORDER BY m.id`).all(subpoolId) as Array<Record<string, unknown> & { userId: number }>;
-  return { subscription, members: members.map((member, index) => ({
-    ...member, userId: undefined, label: member.userId === userId ? '我' : `成员 ${index + 1}`, isCurrentUser: member.userId === userId,
+    WHERE m.subpool_id = ? AND m.status IN ('active', 'suspended') ORDER BY m.id`).all(subpoolId) as Array<Record<string, unknown> & { userId: number; email: string }>;
+  return { subscription, members: members.map((member) => ({
+    ...member, userId: undefined, label: member.email, isCurrentUser: member.userId === userId,
   })) };
 }
 

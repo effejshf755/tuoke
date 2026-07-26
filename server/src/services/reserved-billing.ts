@@ -324,25 +324,24 @@ export function chargeReservedRequest(
           );
 
         const spendableForThisRequest =
-          wallet.balanceMicro -
-          otherReservedMicro;
+          Math.max(
+            0,
+            wallet.balanceMicro -
+              otherReservedMicro,
+          );
 
-        if (
-          spendableForThisRequest <
-          amountMicro
-        ) {
-          return {
-            status:
-              'insufficient_balance',
+        // Admission is controlled only by the fixed minimum wallet balance.
+        // If actual usage costs more than remains after the request, collect
+        // the spendable balance without allowing the wallet to become negative.
+        const chargedMicro =
+          Math.min(
             amountMicro,
-            balanceAfterMicro:
-              wallet.balanceMicro,
-          };
-        }
+            spendableForThisRequest,
+          );
 
         const balanceAfterMicro =
           wallet.balanceMicro -
-          amountMicro;
+          chargedMicro;
 
         // Deduct actual usage and release this
         // reservation atomically.
@@ -356,19 +355,13 @@ export function chargeReservedRequest(
                 reserved_balance_micro - ?
             WHERE id = ?
               AND reserved_balance_micro >= ?
-              AND (
-                balance_micro -
-                (
-                  reserved_balance_micro - ?
-                )
-              ) >= ?
+              AND balance_micro >= ?
           `).run(
-            amountMicro,
+            chargedMicro,
             reservation.reservedMicro,
             request.consumerUserId,
             reservation.reservedMicro,
-            reservation.reservedMicro,
-            amountMicro,
+            chargedMicro,
           );
 
         if (
@@ -414,7 +407,7 @@ export function chargeReservedRequest(
           )
         `).run(
           request.consumerUserId,
-          -amountMicro,
+          -chargedMicro,
           balanceAfterMicro,
           request.id,
           request.platform,
@@ -424,7 +417,9 @@ export function chargeReservedRequest(
           rule.multiplierMilli,
           rule.inputPriceMicroPerMillion,
           rule.outputPriceMicroPerMillion,
-          'API usage charge',
+          chargedMicro < amountMicro
+            ? `API usage charge capped at available balance; calculated cost: ${amountMicro} micro`
+            : 'API usage charge',
         );
 
         const markedRequest =
@@ -436,7 +431,7 @@ export function chargeReservedRequest(
             WHERE id = ?
               AND billing_status = 'unbilled'
           `).run(
-            amountMicro,
+            chargedMicro,
             request.id,
           );
 
@@ -461,7 +456,7 @@ export function chargeReservedRequest(
               AND status = 'reserved'
           `).run(
             request.id,
-            amountMicro,
+            chargedMicro,
             reservation.id,
           );
 
@@ -476,7 +471,7 @@ export function chargeReservedRequest(
 
         return {
           status: 'charged',
-          amountMicro,
+          amountMicro: chargedMicro,
           balanceAfterMicro,
         };
       },
