@@ -91,7 +91,7 @@ export function logRequest(
       const createdAt = db.prepare(`SELECT created_at FROM requests WHERE id = ?`).get(insert.lastInsertRowid) as { created_at: string } | undefined;
       const hour = hourKey(createdAt?.created_at ?? new Date().toISOString().slice(0, 19).replace('T', ' '));
       const isSuccess = status === 'success' ? 1 : 0;
-      const isError = status === 'error' ? 1 : 0;
+      const isError = status === 'error' || status === 'partial' ? 1 : 0;
 
       db.prepare(`
         INSERT INTO request_hourly (hour, total_requests, success_count, error_count, input_tokens, output_tokens)

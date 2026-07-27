@@ -194,11 +194,13 @@ export default function AnalyticsPage({ userScope = false }: { userScope?: boole
   const { data: byPlatform = [] } = useQuery({
     queryKey: ['analytics', apiBase, 'by-platform', range],
     queryFn: () => apiFetch<ByPlatformRow[]>(`${apiBase}/by-platform?range=${range}`),
+    ...refreshOptions,
   })
 
   const { data: timeline = [] } = useQuery({
     queryKey: ['analytics', apiBase, 'timeline', range],
     queryFn: () => apiFetch<TimelineBucket[]>(`${apiBase}/timeline?range=${range}`),
+    ...refreshOptions,
   })
 
   const { data: byModel = [] } = useQuery({
@@ -210,21 +212,25 @@ export default function AnalyticsPage({ userScope = false }: { userScope?: boole
   const { data: byKey = [] } = useQuery({
     queryKey: ['analytics', apiBase, 'by-key', range],
     queryFn: () => apiFetch<ByKeyRow[]>(`${apiBase}/by-key?range=${range}`),
+    ...refreshOptions,
   })
 
   const { data: errors = [] } = useQuery({
     queryKey: ['analytics', apiBase, 'errors', range],
     queryFn: () => apiFetch<RecentErrorRow[]>(`${apiBase}/errors?range=${range}`),
+    ...refreshOptions,
   })
 
   const { data: errorDist } = useQuery({
     queryKey: ['analytics', apiBase, 'error-distribution', range],
     queryFn: () => apiFetch<ErrorDistribution>(`${apiBase}/error-distribution?range=${range}`),
+    ...refreshOptions,
   })
 
   const { data: recentCalls } = useQuery({
     queryKey: ['analytics', apiBase, 'requests', range],
     queryFn: () => apiFetch<RecentCallsResponse>(`${apiBase}/requests?range=${range}&limit=100`),
+    ...refreshOptions,
   })
 
   // Savings card shows ONE stable monthly figure regardless of the selected

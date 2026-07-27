@@ -100,3 +100,33 @@ describe('GET /api/analytics/requests', () => {
     expect(row).toEqual({ client_ip: '192.168.0.99', client_user_agent: 'vitest-client/1.0' });
   });
 });
+
+describe('GET /api/analytics/errors', () => {
+  let app: Express;
+
+  beforeAll(() => {
+    process.env.ENCRYPTION_KEY = '0'.repeat(64);
+    initDb(':memory:');
+    app = createApp();
+    dashToken = mintDashboardToken();
+  });
+
+  beforeEach(() => {
+    getDb().prepare('DELETE FROM requests').run();
+  });
+
+  it('includes interrupted streams that delivered partial output', async () => {
+    insertCall(recentUtcTimestamp(10).sql, null, null, 'error');
+    getDb().prepare(`
+      INSERT INTO requests (platform, model_id, status, input_tokens, output_tokens, latency_ms, error, created_at)
+      VALUES ('test', 'stream-model', 'partial', 10, 5, 42, 'stream interrupted', ?)
+    `).run(recentUtcTimestamp(11).sql);
+
+    const errors = await request(app, '/api/analytics/errors?range=7d');
+    expect(errors.status).toBe(200);
+    expect(errors.body.map((row: any) => row.error)).toContain('stream interrupted');
+
+    const distribution = await request(app, '/api/analytics/error-distribution?range=7d');
+    expect(distribution.body.byCategory.reduce((sum: number, row: any) => sum + row.count, 0)).toBe(2);
+  });
+});

@@ -246,7 +246,7 @@ analyticsRouter.get('/by-platform', (req: Request, res: Response) => {
       SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) * 100.0 / COUNT(*) as success_rate,
       AVG(latency_ms) as avg_latency_ms,
       AVG(ttfb_ms) as avg_ttfb_ms,
-      SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) as error_count,
+      SUM(CASE WHEN status IN ('error', 'partial') THEN 1 ELSE 0 END) as error_count,
       AVG(CASE WHEN output_tokens > 0 AND latency_ms > 0
         THEN output_tokens / (latency_ms / 1000.0) ELSE NULL END) as avg_tokens_per_second,
       SUM(input_tokens) as total_input_tokens,
@@ -393,7 +393,7 @@ analyticsRouter.get('/error-distribution', (req: Request, res: Response) => {
       END as error_category,
       COUNT(*) as count
     FROM requests
-    WHERE status = 'error' AND created_at >= ?
+    WHERE status IN ('error', 'partial') AND created_at >= ?
     GROUP BY platform, error_category
     ORDER BY count DESC
   `).all(since) as any[];
@@ -413,7 +413,7 @@ analyticsRouter.get('/error-distribution', (req: Request, res: Response) => {
       END as category,
       COUNT(*) as count
     FROM requests
-    WHERE status = 'error' AND created_at >= ?
+    WHERE status IN ('error', 'partial') AND created_at >= ?
     GROUP BY category
     ORDER BY count DESC
   `).all(since) as any[];
@@ -422,7 +422,7 @@ analyticsRouter.get('/error-distribution', (req: Request, res: Response) => {
   const byPlatform = db.prepare(`
     SELECT platform, COUNT(*) as count
     FROM requests
-    WHERE status = 'error' AND created_at >= ?
+    WHERE status IN ('error', 'partial') AND created_at >= ?
     GROUP BY platform
     ORDER BY count DESC
   `).all(since) as any[];
@@ -443,7 +443,7 @@ analyticsRouter.get('/errors', (req: Request, res: Response) => {
   const rows = db.prepare(`
     SELECT id, platform, model_id, error, latency_ms, created_at
     FROM requests
-    WHERE status = 'error' AND created_at >= ?
+    WHERE status IN ('error', 'partial') AND created_at >= ?
     ORDER BY created_at DESC
     LIMIT 50
   `).all(since) as any[];
