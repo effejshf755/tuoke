@@ -495,6 +495,10 @@ const EmbeddingsBody = z.object({
 });
 
 proxyRouter.post('/embeddings', async (req: Request, res: Response) => {
+  if (getClientContext().consumerUserId !== null) {
+    res.status(403).json({ error: { message: 'Consumer billing is not available for embeddings.', type: 'billing_not_supported' } });
+    return;
+  }
   const token = extractApiToken(req);
   const unifiedKey = getUnifiedApiKey();
   if (!token || !timingSafeStringEqual(token, unifiedKey)) {
@@ -543,6 +547,10 @@ function mediaErrorType(status: number): string {
 }
 
 proxyRouter.post('/images/generations', async (req: Request, res: Response) => {
+  if (getClientContext().consumerUserId !== null) {
+    res.status(403).json({ error: { message: 'Consumer billing is not available for image generation.', type: 'billing_not_supported' } });
+    return;
+  }
   const token = extractApiToken(req);
   const unifiedKey = getUnifiedApiKey();
   if (!token || !timingSafeStringEqual(token, unifiedKey)) {
@@ -581,6 +589,10 @@ const SpeechBody = z.object({
 });
 
 proxyRouter.post('/audio/speech', async (req: Request, res: Response) => {
+  if (getClientContext().consumerUserId !== null) {
+    res.status(403).json({ error: { message: 'Consumer billing is not available for speech generation.', type: 'billing_not_supported' } });
+    return;
+  }
   const token = extractApiToken(req);
   const unifiedKey = getUnifiedApiKey();
   if (!token || !timingSafeStringEqual(token, unifiedKey)) {
@@ -896,7 +908,7 @@ proxyRouter.post('/completions', async (req: Request, res: Response) => {
               latencyMs: Date.now() - start,
               error: sanitizeProviderErrorMessage(streamErr.message),
             });
-            logRequest(route.platform, route.modelId, route.keyId, 'error', estimatedInputTokens, totalOutputTokens, Date.now() - start, sanitizeProviderErrorMessage(streamErr.message), ttfbMs, pinnedModelId);
+            logRequest(route.platform, route.modelId, route.keyId, 'partial', estimatedInputTokens, totalOutputTokens, Date.now() - start, sanitizeProviderErrorMessage(streamErr.message), ttfbMs, pinnedModelId);
             return 'committed';
           }
           throw streamErr;
@@ -1743,7 +1755,7 @@ export async function chatCompletionHandler(req: Request, res: Response) {
               route.platform,
               route.modelId,
               route.keyId,
-              'error',
+              'partial',
               estimatedInputTokens + injectedHandoffTokens,
               totalOutputTokens,
               Date.now() - start,
@@ -1805,7 +1817,7 @@ export async function chatCompletionHandler(req: Request, res: Response) {
               latencyMs: Date.now() - start,
               error: sanitizeProviderErrorMessage(streamErr.message),
             });
-            logRequest(route.platform, route.modelId, route.keyId, 'error', estimatedInputTokens, totalOutputTokens, Date.now() - start, sanitizeProviderErrorMessage(streamErr.message), ttfbMs, pinnedModelId);
+            logRequest(route.platform, route.modelId, route.keyId, 'partial', estimatedInputTokens, totalOutputTokens, Date.now() - start, sanitizeProviderErrorMessage(streamErr.message), ttfbMs, pinnedModelId);
             return 'committed';
           }
           // Headers never sent — bubble to the shared loop, which cooldowns this

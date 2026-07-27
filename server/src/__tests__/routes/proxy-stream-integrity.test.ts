@@ -211,7 +211,7 @@ describe('proxy stream turn-integrity', () => {
     expect(fs.some(f => f.choices?.[0]?.delta?.content === 'Partial ans')).toBe(true);
     expect(fs.some(f => f.error?.type === 'stream_error')).toBe(true);
     const rows = getDb().prepare("SELECT status FROM requests ORDER BY id").all() as any[];
-    expect(rows[0].status).toBe('error'); // truncation is never a success
+    expect(rows[0].status).toBe('partial'); // delivered usage is billable, but not a success
   });
 
   it('fails over a stream that completes with no content and no tool calls', async () => {

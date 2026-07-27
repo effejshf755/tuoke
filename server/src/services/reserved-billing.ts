@@ -116,12 +116,13 @@ export function chargeReservedRequest(
           };
         }
 
-        // Failed routing attempts are not charged.
+        // Failed routing attempts are not charged. A partial stream has
+        // delivered billable output and must settle its observed usage.
         // Do not release the reservation here because
         // failover may still succeed on another route.
         if (
-          request.status !==
-          'success'
+          request.status !== 'success' &&
+          request.status !== 'partial'
         ) {
           markRequestExempt(
             db,
@@ -334,14 +335,18 @@ export function chargeReservedRequest(
               otherReservedMicro,
           );
 
-        // Admission is controlled only by the fixed minimum wallet balance.
-        // If actual usage costs more than remains after the request, collect
-        // the spendable balance without allowing the wallet to become negative.
-        const chargedMicro =
-          Math.min(
+        // Admission reserves the maximum estimated request cost. If the actual
+        // charge is unexpectedly uncovered, retain the reservation for
+        // recovery instead of silently settling an underpaid request.
+        if (amountMicro > spendableForThisRequest) {
+          return {
+            status: 'insufficient_balance',
             amountMicro,
-            spendableForThisRequest,
-          );
+            balanceAfterMicro: wallet.balanceMicro,
+          };
+        }
+
+        const chargedMicro = amountMicro;
 
         const balanceAfterMicro =
           wallet.balanceMicro -
@@ -427,9 +432,7 @@ export function chargeReservedRequest(
           rule.cachedInputMultiplierMilli,
           rule.inputPriceMicroPerMillion,
           rule.outputPriceMicroPerMillion,
-          chargedMicro < amountMicro
-            ? `API usage charge capped at available balance; calculated cost: ${amountMicro} micro`
-            : 'API usage charge',
+          'API usage charge',
         );
 
         const markedRequest =

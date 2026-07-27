@@ -68,6 +68,14 @@ export function consumeFreeModelRequest(
   };
 }
 
+export function releaseFreeModelRequest(db: Db, userId: number, usageDate: string): void {
+  db.prepare(`
+    UPDATE free_model_daily_usage
+    SET request_count = MAX(0, request_count - 1), updated_at = datetime('now')
+    WHERE user_id = ? AND usage_date = ? AND request_count > 0
+  `).run(userId, usageDate);
+}
+
 export function activateRechargedFreeTier(
   db: Db,
   userId: number,

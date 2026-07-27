@@ -777,7 +777,7 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
               route.platform,
               route.modelId,
               route.keyId,
-              'error',
+              'partial',
               estimatedInputTokens,
               totalOutputTokens,
               Date.now() - start,
@@ -847,7 +847,7 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
               latencyMs: Date.now() - start,
               error: safe,
             });
-            logRequest(route.platform, route.modelId, route.keyId, 'error', estimatedInputTokens, totalOutputTokens, Date.now() - start, safe);
+            logRequest(route.platform, route.modelId, route.keyId, 'partial', estimatedInputTokens, totalOutputTokens, Date.now() - start, safe);
             sse('response.failed', { response: { id: responseId, object: 'response', status: 'failed', error: { message: `Provider error (${route.displayName}): stream interrupted`, type: 'stream_error' } } });
             res.end();
             return 'committed';

@@ -32,6 +32,7 @@ import {
   setConsumerIdentity,
   setResourceReservation,
   getClientContext,
+  setFreeModelUsage,
 } from '../lib/client-context.js';
 import {
   estimateCodexQuotaUnits,
@@ -41,12 +42,14 @@ import {
 } from '../services/resource-quota.js';
 import {
   consumeFreeModelRequest,
+  releaseFreeModelRequest,
   getAvailableBalanceMicro,
   isExplicitFreeModel,
   PAID_MODEL_MINIMUM_BALANCE_MICRO,
 } from '../services/free-model-access.js';
 
 const consumerRequestTimes = new Map<number, number[]>();
+const consumerUserRequestTimes = new Map<number, number[]>();
 
 /**
  * Prepaid consumer billing gate.
@@ -202,8 +205,19 @@ export function consumerQuota(
     res.status(429).json({ error: { message: 'Consumer API key rate limit exceeded.', type: 'rate_limit_exceeded' } });
     return;
   }
+  const userRecent = (consumerUserRequestTimes.get(key.userId) ?? []).filter((time) => now - time < 60_000);
+  const userRpm = Number(getSetting('default_consumer_rpm') ?? 60);
+  if (userRpm === 0 || userRecent.length >= userRpm) {
+    consumerRequestTimes.set(key.id, recent);
+    consumerUserRequestTimes.set(key.userId, userRecent);
+    res.setHeader('Retry-After', '60');
+    res.status(429).json({ error: { message: 'Consumer user rate limit exceeded.', type: 'rate_limit_exceeded' } });
+    return;
+  }
   recent.push(now);
   consumerRequestTimes.set(key.id, recent);
+  userRecent.push(now);
+  consumerUserRequestTimes.set(key.userId, userRecent);
 
   /*
    * Calculate the maximum safe authorization amount
@@ -267,6 +281,21 @@ export function consumerQuota(
       return;
     }
 
+    const usageDate = (db.prepare("SELECT date('now', '+8 hours') AS value").get() as { value: string }).value;
+    setFreeModelUsage(usageDate);
+    const context = getClientContext();
+    let scheduled = false;
+    const cleanup = () => {
+      if (scheduled) return;
+      scheduled = true;
+      const timer = setTimeout(() => {
+        if (!context.freeModelUsageCommitted) releaseFreeModelRequest(db, key.userId, usageDate);
+      }, 5000);
+      timer.unref();
+    };
+    res.once('finish', cleanup);
+    res.once('close', cleanup);
+
     next();
     return;
   }
@@ -324,7 +353,7 @@ export function consumerQuota(
 
       estimate.requestedModel,
 
-      PAID_MODEL_MINIMUM_BALANCE_MICRO,
+      Math.max(PAID_MODEL_MINIMUM_BALANCE_MICRO, estimate.reserveMicro),
     );
 
   if (
@@ -340,7 +369,7 @@ export function consumerQuota(
           'insufficient_balance',
 
         required_micro:
-          PAID_MODEL_MINIMUM_BALANCE_MICRO,
+          Math.max(PAID_MODEL_MINIMUM_BALANCE_MICRO, estimate.reserveMicro),
 
         available_micro:
           reservation.availableMicro,

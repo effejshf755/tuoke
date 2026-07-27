@@ -22,7 +22,7 @@ describe('reserved PAYG billing', () => {
     )).toBe(1_400_000);
   });
 
-  it('charges only the spendable wallet balance when actual usage costs more', () => {
+  it('does not silently settle when actual usage exceeds spendable balance', () => {
     const db = getDb();
     const userId = Number(db.prepare(`INSERT INTO users (email, password_hash, balance_micro)
       VALUES ('capped-settlement@example.com', 'x', 100000)`).run().lastInsertRowid);
@@ -42,12 +42,33 @@ describe('reserved PAYG billing', () => {
       .run(model.platform, model.modelId, userId).lastInsertRowid);
     const result = chargeReservedRequest(db, requestId, reserved.reservationId);
 
-    expect(result).toEqual({ status: 'charged', amountMicro: 100_000, balanceAfterMicro: 0 });
+    expect(result).toEqual({ status: 'insufficient_balance', amountMicro: 2_000_000, balanceAfterMicro: 100_000 });
     expect(db.prepare(`SELECT balance_micro balanceMicro, reserved_balance_micro reservedMicro
-      FROM users WHERE id = ?`).get(userId)).toEqual({ balanceMicro: 0, reservedMicro: 0 });
+      FROM users WHERE id = ?`).get(userId)).toEqual({ balanceMicro: 100_000, reservedMicro: 100_000 });
     expect(db.prepare(`SELECT billing_amount_micro amountMicro, billing_status status
-      FROM requests WHERE id = ?`).get(requestId)).toEqual({ amountMicro: 100_000, status: 'charged' });
+      FROM requests WHERE id = ?`).get(requestId)).toEqual({ amountMicro: 0, status: 'unbilled' });
     expect(db.prepare(`SELECT actual_micro actualMicro, status FROM wallet_reservations
-      WHERE id = ?`).get(reserved.reservationId)).toEqual({ actualMicro: 100_000, status: 'settled' });
+      WHERE id = ?`).get(reserved.reservationId)).toEqual({ actualMicro: null, status: 'reserved' });
+  });
+
+  it('charges observed usage from a partial stream', () => {
+    const db = getDb();
+    const userId = Number(db.prepare(`INSERT INTO users (email, password_hash, balance_micro)
+      VALUES ('partial-stream@example.com', 'x', 5000000)`).run().lastInsertRowid);
+    const model = db.prepare(`SELECT platform, model_id modelId FROM model_billing_rules
+      WHERE billing_enabled = 1 LIMIT 1`).get() as { platform: string; modelId: string };
+    db.prepare(`UPDATE model_billing_rules SET input_price_micro_per_million = 1000000,
+      output_price_micro_per_million = 1000000, multiplier_milli = 1000
+      WHERE platform = ? AND model_id = ?`).run(model.platform, model.modelId);
+    const reserved = reserveWalletBalance(db, userId, null, model.modelId, 1_000_000);
+    if (reserved.status !== 'reserved') throw new Error('Expected reservation');
+    const requestId = Number(db.prepare(`INSERT INTO requests
+      (platform, model_id, status, input_tokens, output_tokens, consumer_user_id, billing_status)
+      VALUES (?, ?, 'partial', 1000, 1000, ?, 'unbilled')`)
+      .run(model.platform, model.modelId, userId).lastInsertRowid);
+
+    expect(chargeReservedRequest(db, requestId, reserved.reservationId)).toEqual({
+      status: 'charged', amountMicro: 2_000, balanceAfterMicro: 4_998_000,
+    });
   });
 });

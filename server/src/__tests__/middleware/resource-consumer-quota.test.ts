@@ -74,7 +74,7 @@ describe('Codex resource consumer quota', () => {
     expect((db.prepare(`SELECT balance_micro balance FROM users WHERE id = ?`).get(userId) as { balance: number }).balance).toBe(0);
   });
 
-  it('admits PAYG requests at 0.1 yuan with a fixed reservation regardless of context size', () => {
+  it('requires the estimated maximum PAYG cost to be available', () => {
     const db = getDb();
     const model = { modelId: 'payg-fixed-reservation-test' };
     db.prepare(`INSERT INTO models (
@@ -112,11 +112,15 @@ describe('Codex resource consumer quota', () => {
     expect((below.res.body as any).error.minimum_balance_micro).toBe(100_000);
 
     const atThreshold = callGate('payg-at-threshold@example.com', PAID_MODEL_MINIMUM_BALANCE_MICRO);
-    expect(atThreshold.continued).toBe(true);
-    expect(atThreshold.res.statusCode).toBe(200);
+    expect(atThreshold.continued).toBe(false);
+    expect(atThreshold.res.statusCode).toBe(402);
+    expect((atThreshold.res.body as any).error.required_micro).toBeGreaterThan(PAID_MODEL_MINIMUM_BALANCE_MICRO);
+
+    const funded = callGate('payg-funded@example.com', 10_000_000);
+    expect(funded.continued).toBe(true);
     const reservation = db.prepare(`SELECT reserved_micro reservedMicro FROM wallet_reservations
-      WHERE user_id = ? AND status = 'reserved'`).get(atThreshold.userId) as { reservedMicro: number };
-    expect(reservation.reservedMicro).toBe(PAID_MODEL_MINIMUM_BALANCE_MICRO);
+      WHERE user_id = ? AND status = 'reserved'`).get(funded.userId) as { reservedMicro: number };
+    expect(reservation.reservedMicro).toBeGreaterThan(PAID_MODEL_MINIMUM_BALANCE_MICRO);
   });
 
   it('enforces all three key scopes and keeps ordinary Codex and resource accounts separate', () => {

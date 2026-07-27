@@ -4,6 +4,7 @@ import { getDb } from '../db/index.js';
 import { pruneRequestAnalytics } from '../services/request-retention.js';
 import {
   getClientContext,
+  markFreeModelUsageCommitted,
   takeCodexUsageRecordId,
 } from './client-context.js';
 import {
@@ -118,6 +119,10 @@ export function logRequest(
     });
 
     const requestId = tx();
+
+    if (client.freeModelUsageDate !== null && (status === 'success' || status === 'partial')) {
+      markFreeModelUsageCommitted();
+    }
 
     if (client.resourceQuotaReservationId !== null) {
       try {

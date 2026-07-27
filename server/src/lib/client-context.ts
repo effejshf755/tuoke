@@ -15,6 +15,8 @@ export interface ClientContext {
   resourceRequestCorrelationId: string | null;
   resourceDispatchId: number | null;
   resourceUsageObserved: boolean;
+  freeModelUsageDate: string | null;
+  freeModelUsageCommitted: boolean;
 }
 
 // Request-scoped caller identity, readable from anywhere below the middleware
@@ -36,6 +38,8 @@ function createContext(ip: string | null, userAgent: string | null): ClientConte
     resourceRequestCorrelationId: { value: null, writable: true, enumerable: false },
     resourceDispatchId: { value: null, writable: true, enumerable: false },
     resourceUsageObserved: { value: false, writable: true, enumerable: false },
+    freeModelUsageDate: { value: null, writable: true, enumerable: false },
+    freeModelUsageCommitted: { value: false, writable: true, enumerable: false },
   });
   return context;
 }
@@ -124,6 +128,16 @@ export function setResourceDispatchId(dispatchId: number | null): void {
 export function markResourceUsageObserved(): void {
   const context = storage.getStore();
   if (context && context.resourceQuotaReservationId !== null) context.resourceUsageObserved = true;
+}
+
+export function setFreeModelUsage(usageDate: string): void {
+  const context = storage.getStore();
+  if (context) context.freeModelUsageDate = usageDate;
+}
+
+export function markFreeModelUsageCommitted(): void {
+  const context = storage.getStore();
+  if (context) context.freeModelUsageCommitted = true;
 }
 
 /**
