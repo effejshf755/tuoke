@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { Copy, Upload } from 'lucide-react'
+import { ChevronDown, Copy, Upload } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -91,6 +91,34 @@ export default function UserWalletPanel() {
       <div className="mt-4 flex flex-wrap items-center gap-3"><Input className="max-w-sm" type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setProof(event.target.files?.[0] ?? null)} /><Button variant="outline" disabled={!proof || upload.isPending} onClick={() => upload.mutate()}><Upload />{upload.isPending ? '上传中...' : '提交付款截图'}</Button>{activeManualOrder.proof_submitted_at && <span className="text-sm text-emerald-600">付款凭证已提交，等待管理员确认</span>}</div>
     </div>}
 
-    <div className="mt-6 grid gap-6 lg:grid-cols-2"><div><h3 className="font-medium">充值记录</h3><div className="mt-3 space-y-2">{orders.data?.orders.slice(0, 8).map((order) => <div key={order.id} className="border-b py-3 text-sm"><div className="flex flex-wrap justify-between gap-2"><span className="font-mono text-xs">{order.order_no}</span><span>{money(order.amount)}</span><span>{statusText[order.status] ?? order.status}</span></div>{order.payment_reference && <div className="mt-1 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground"><span>备注码 {order.payment_reference}{order.proof_submitted_at ? ' · 凭证已提交' : ''}</span>{order.status === 'pending' && <Button size="sm" variant="outline" onClick={() => { setActiveManualOrder(order); setProof(null); window.scrollTo({ top: 0, behavior: 'smooth' }) }}>查看付款信息</Button>}</div>}</div>)}</div></div><div><h3 className="font-medium">账单记录</h3><div className="mt-3 space-y-2">{billing.data?.transactions.slice(0, 8).map((item) => <div key={item.id} className="flex flex-wrap justify-between gap-2 border-b py-3 text-sm"><span>{item.type === 'recharge' ? '充值' : item.type}</span><span>{item.delta >= 0 ? '+' : ''}{money(item.delta / 1_000_000)}</span><span className="text-xs text-muted-foreground">{formatBeijingDateTime(item.created_at)}</span></div>)}</div></div></div>
+    <div className="mt-6 grid items-start gap-3 lg:grid-cols-2">
+      <details className="group rounded-xl border bg-background/30">
+        <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-3 px-4 py-3">
+          <span className="font-medium">充值记录</span>
+          <span className="flex items-center gap-2 text-xs text-muted-foreground">
+            {orders.data?.orders.length ?? 0} 条
+            <ChevronDown className="size-4 transition-transform group-open:rotate-180" />
+          </span>
+        </summary>
+        <div className="border-t px-4 pb-2">
+          {orders.data?.orders.slice(0, 8).map((order) => <div key={order.id} className="border-b py-3 text-sm last:border-b-0"><div className="flex flex-wrap justify-between gap-2"><span className="font-mono text-xs">{order.order_no}</span><span>{money(order.amount)}</span><span>{statusText[order.status] ?? order.status}</span></div>{order.payment_reference && <div className="mt-1 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground"><span>备注码 {order.payment_reference}{order.proof_submitted_at ? ' · 凭证已提交' : ''}</span>{order.status === 'pending' && <Button size="sm" variant="outline" onClick={() => { setActiveManualOrder(order); setProof(null); window.scrollTo({ top: 0, behavior: 'smooth' }) }}>查看付款信息</Button>}</div>}</div>)}
+          {!orders.isLoading && (orders.data?.orders.length ?? 0) === 0 && <p className="py-4 text-sm text-muted-foreground">暂无充值记录</p>}
+        </div>
+      </details>
+
+      <details className="group rounded-xl border bg-background/30">
+        <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-3 px-4 py-3">
+          <span className="font-medium">账单记录</span>
+          <span className="flex items-center gap-2 text-xs text-muted-foreground">
+            {billing.data?.transactions.length ?? 0} 条
+            <ChevronDown className="size-4 transition-transform group-open:rotate-180" />
+          </span>
+        </summary>
+        <div className="border-t px-4 pb-2">
+          {billing.data?.transactions.slice(0, 8).map((item) => <div key={item.id} className="flex flex-wrap justify-between gap-2 border-b py-3 text-sm last:border-b-0"><span>{item.type === 'recharge' ? '充值' : item.type}</span><span>{item.delta >= 0 ? '+' : ''}{money(item.delta / 1_000_000)}</span><span className="text-xs text-muted-foreground">{formatBeijingDateTime(item.created_at)}</span></div>)}
+          {!billing.isLoading && (billing.data?.transactions.length ?? 0) === 0 && <p className="py-4 text-sm text-muted-foreground">暂无账单记录</p>}
+        </div>
+      </details>
+    </div>
   </section>
 }
