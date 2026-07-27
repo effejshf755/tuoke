@@ -28,7 +28,36 @@ type AdminUser = {
   api_keys: string | null
 }
 
-type AdminApiKey = { id: number; name: string; key_prefix: string; status: string; enabled: number; last_used_at: string | null; rate_limit_rpm: number | null; request_count: number; input_tokens: number; output_tokens: number }
+type AdminApiKey = {
+  id: number
+  name: string
+  key_prefix: string
+  key_scope: 'universal' | 'codex_pool' | 'resource_subpool'
+  status: string
+  enabled: number
+  created_at: string
+  last_used_at: string | null
+  expires_at: string | null
+  rate_limit_rpm: number | null
+  request_count: number
+  input_tokens: number
+  output_tokens: number
+}
+
+const keyScopeDetails: Record<AdminApiKey['key_scope'], { label: string; description: string }> = {
+  universal: {
+    label: '普通模型调用',
+    description: '可调用平台开放模型，不包含 Codex 账号池。',
+  },
+  codex_pool: {
+    label: 'Codex 账号池',
+    description: '使用 Codex OAuth 账号池资源。',
+  },
+  resource_subpool: {
+    label: 'Codex 拼单',
+    description: '仅使用已购买并激活的 Codex 拼单套餐额度。',
+  },
+}
 
 type WalletUser = {
   id: number
@@ -578,12 +607,27 @@ export default function AdminUsersPage() {
                     {parseKeys(user.api_keys).map((key) => {
                       const mode = key.rate_limit_rpm === null ? 'default' : key.rate_limit_rpm === 0 ? 'blocked' : 'custom'
                       const effective = key.rate_limit_rpm ?? 60
+                      const scope = keyScopeDetails[key.key_scope] ?? keyScopeDetails.universal
                       return <div key={key.id} className="rounded-xl border p-3 text-xs">
-                        <div className="font-medium">{key.name}</div>
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <div className="font-medium">{key.name}</div>
+                          <span className="rounded-full border px-2 py-0.5 font-medium">{scope.label}</span>
+                        </div>
                         <div className="mt-1 font-mono text-muted-foreground">{key.key_prefix}...</div>
-                        <div className="mt-1 text-muted-foreground">{key.status}{key.enabled ? '' : ' · 已暂停'} · 最近使用：{formatDate(key.last_used_at)}</div>
-                        <div className="mt-1 text-muted-foreground">请求 {formatNumber(key.request_count)} · Token {formatNumber(key.input_tokens + key.output_tokens)}</div>
-                        <select className="mt-2 h-8 rounded border border-input bg-background/95 px-2 text-foreground shadow-lg backdrop-blur-xl" style={{ colorScheme: 'dark' }} value={mode} onChange={(e) => { if (e.target.value === 'custom') setRpmValues((current) => ({ ...current, [key.id]: String(key.rate_limit_rpm ?? effective) })); saveRpm(user.id, key, e.target.value) }}>
+                        <div className="mt-2 rounded-lg bg-muted/40 p-2 text-muted-foreground">
+                          <div className="font-medium text-foreground">调用范围</div>
+                          <div className="mt-0.5 leading-relaxed">{scope.description}</div>
+                        </div>
+                        <div className="mt-2 grid gap-x-3 gap-y-1 text-muted-foreground sm:grid-cols-2">
+                          <div>状态：{key.status}{key.enabled ? '' : ' · 已暂停'}</div>
+                          <div>请求：{formatNumber(key.request_count)} 次</div>
+                          <div>输入 Token：{formatNumber(key.input_tokens)}</div>
+                          <div>输出 Token：{formatNumber(key.output_tokens)}</div>
+                          <div>创建时间：{formatDate(key.created_at)}</div>
+                          <div>最近使用：{formatDate(key.last_used_at)}</div>
+                          <div className="sm:col-span-2">过期时间：{key.expires_at ? formatDate(key.expires_at) : '永不过期'}</div>
+                        </div>
+                        <select className="mt-3 h-8 rounded border border-input bg-background/95 px-2 text-foreground shadow-lg backdrop-blur-xl" style={{ colorScheme: 'dark' }} value={mode} onChange={(e) => { if (e.target.value === 'custom') setRpmValues((current) => ({ ...current, [key.id]: String(key.rate_limit_rpm ?? effective) })); saveRpm(user.id, key, e.target.value) }}>
                           <option className="bg-background text-foreground" value="default">平台默认（{effective} RPM）</option><option className="bg-background text-foreground" value="blocked">禁止调用</option><option className="bg-background text-foreground" value="custom">自定义 RPM</option>
                         </select>
                         {mode === 'custom' && <div className="mt-2 flex gap-2"><Input className="h-8" type="number" min="1" max="100000" value={rpmValues[key.id] ?? String(key.rate_limit_rpm)} onChange={(e) => setRpmValues((current) => ({ ...current, [key.id]: e.target.value }))} /><Button size="xs" disabled={updateRpm.isPending} onClick={() => saveRpm(user.id, key, 'custom')}>保存</Button></div>}
