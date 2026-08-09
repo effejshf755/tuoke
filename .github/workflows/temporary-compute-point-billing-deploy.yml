@@ -1,0 +1,125 @@
+name: Temporary Tuoke compute-point billing deployment
+
+on:
+  push:
+    branches:
+      - codex/deploy-compute-point-billing-r1-20260810
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tuoke-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DEPLOY_HOST: 80.253.254.177
+      DEPLOY_USER: root
+      EXPECTED_SHA256: b8e21e6349c7832dba3f15cb48dbffa15fabdc4051d605706e14fb13589cfe94
+      PAYLOAD_FILE: deployment-payload/compute-point-billing-20260810-r1-ci.tgz
+      SSHPASS: ${{ secrets.TUOKE_DEPLOY_PASSWORD_RELAY_STABILITY_V2_R1_RETRY_20260809 }}
+
+    steps:
+      - name: Check out immutable deployment payload
+        uses: actions/checkout@v4
+
+      - name: Verify exact payload hash
+        run: |
+          actual_sha="$(sha256sum "$PAYLOAD_FILE" | awk '{print $1}')"
+          test "$actual_sha" = "$EXPECTED_SHA256"
+          echo payload_sha256_verified=true
+
+      - name: Install SSH client helper
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass
+
+      - name: Pin production host identity
+        run: |
+          install -d -m 0700 "$HOME/.ssh"
+          printf '%s\n' '80.253.254.177 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJS003ozsuy8Lbn3Km0Nf/ixxJEFTpLV8aiBEIHc/IO5' > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/known_hosts"
+
+      - name: Read-only production preflight
+        run: |
+          sshpass -e ssh \
+            -o BatchMode=no \
+            -o IdentitiesOnly=yes \
+            -o PreferredAuthentications=password \
+            -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=20 \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            'set -eu; expected="migration-japan/tuokeapi:20260809-relay-final-accounting-delete-r1"; state="$(docker inspect --format "{{.State.Status}}" tuoke-prod-freellmapi-1)"; image="$(docker inspect --format "{{.Config.Image}}" tuoke-prod-freellmapi-1)"; image_id="$(docker inspect --format "{{.Image}}" tuoke-prod-freellmapi-1)"; test "$state" = running; test "$image" = "$expected"; test -n "$image_id"; test -f /srv/tuoke-prod/docker-compose.yml; docker exec tuoke-prod-freellmapi-1 test -s /app/server/data/freeapi.db; printf "preflight_state=%s\npreflight_image=%s\npreflight_image_id=%s\n" "$state" "$image" "$image_id"'
+
+      - name: Transfer exact verified payload
+        id: payload
+        run: |
+          remote_archive="/tmp/tuoke-compute-point-billing-${GITHUB_RUN_ID}.tgz"
+          remote_stage="/tmp/tuoke-compute-point-billing-${GITHUB_RUN_ID}"
+          sshpass -e scp \
+            -O \
+            -o BatchMode=no \
+            -o IdentitiesOnly=yes \
+            -o PreferredAuthentications=password \
+            -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=20 \
+            "$PAYLOAD_FILE" "$DEPLOY_USER@$DEPLOY_HOST:$remote_archive"
+          {
+            echo "remote_archive=$remote_archive"
+            echo "remote_stage=$remote_stage"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Deploy with backup and automatic rollback
+        run: |
+          sshpass -e ssh \
+            -o BatchMode=no \
+            -o IdentitiesOnly=yes \
+            -o PreferredAuthentications=password \
+            -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=20 \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            bash -s -- \
+            '${{ steps.payload.outputs.remote_archive }}' \
+            '${{ steps.payload.outputs.remote_stage }}' \
+            "$EXPECTED_SHA256" <<'REMOTE'
+          set -Eeuo pipefail
+          archive="$1"
+          stage="$2"
+          expected_sha="$3"
+          case "$archive" in /tmp/tuoke-compute-point-billing-[0-9]*.tgz) ;; *) exit 91 ;; esac
+          case "$stage" in /tmp/tuoke-compute-point-billing-[0-9]*) ;; *) exit 92 ;; esac
+          test -f "$archive"
+          test ! -e "$stage"
+          printf '%s  %s\n' "$expected_sha" "$archive" | sha256sum -c -
+          install -d -m 0700 "$stage"
+          tar -xzf "$archive" -C "$stage"
+          release_root="$stage/compute-point-billing-20260810-r1"
+          test -f "$release_root/deploy.sh"
+          test -f "$release_root/MANIFEST.sha256"
+          bash "$release_root/deploy.sh"
+          REMOTE
+
+      - name: Verify public production endpoint
+        run: |
+          ping_body="$(curl --fail --silent --show-error --retry 8 --retry-delay 3 --retry-all-errors https://tuokeapi.com/api/ping)"
+          python3 -c 'import json,sys; assert json.loads(sys.argv[1]).get("status") == "ok"' "$ping_body"
+          curl --fail --silent --show-error --retry 8 --retry-delay 3 --retry-all-errors https://tuokeapi.com/ >/dev/null
+          echo public_verification=ok
+
+      - name: Clean temporary remote payload
+        if: always() && steps.payload.outputs.remote_archive != ''
+        run: |
+          sshpass -e ssh \
+            -o BatchMode=no \
+            -o IdentitiesOnly=yes \
+            -o PreferredAuthentications=password \
+            -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=20 \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            rm -rf -- \
+            '${{ steps.payload.outputs.remote_archive }}' \
+            '${{ steps.payload.outputs.remote_stage }}'
