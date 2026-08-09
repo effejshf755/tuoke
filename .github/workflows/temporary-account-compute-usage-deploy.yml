@@ -1,0 +1,143 @@
+name: Temporary Tuoke account compute usage deployment
+
+on:
+  push:
+    branches:
+      - codex/deploy-account-compute-usage-r1-20260810
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tuoke-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DEPLOY_HOST: 80.253.254.177
+      DEPLOY_USER: root
+      EXPECTED_SHA256: c83253a72e50fda52413268157ab2bafa7732863a746a83e0ab8a2caf8215694
+      PAYLOAD_FILE: deployment-payload/account-compute-usage-20260810-r1.tgz
+      SSHPASS: ${{ secrets.TUOKE_DEPLOY_PASSWORD_RELAY_STABILITY_V2_R1_RETRY_20260809 }}
+
+    steps:
+      - name: Check out immutable deployment payload
+        uses: actions/checkout@v4
+
+      - name: Verify exact payload hash
+        run: |
+          actual_sha="$(sha256sum "$PAYLOAD_FILE" | awk '{print $1}')"
+          test "$actual_sha" = "$EXPECTED_SHA256"
+          echo payload_sha256_verified=true
+
+      - name: Install SSH client helper
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass
+
+      - name: Pin production host identity
+        run: |
+          install -d -m 0700 "$HOME/.ssh"
+          printf '%s\n' '80.253.254.177 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJS003ozsuy8Lbn3Km0Nf/ixxJEFTpLV8aiBEIHc/IO5' > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/known_hosts"
+
+      - name: Read-only production preflight
+        run: |
+          sshpass -e ssh \
+            -o BatchMode=no \
+            -o IdentitiesOnly=yes \
+            -o PreferredAuthentications=password \
+            -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=20 \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            'set -eu
+             expected="migration-japan/tuokeapi:20260810-relay-balance-request-local-r1"
+             state="$(docker inspect --format "{{.State.Status}}" tuoke-prod-freellmapi-1)"
+             image="$(docker inspect --format "{{.Config.Image}}" tuoke-prod-freellmapi-1)"
+             image_id="$(docker inspect --format "{{.Image}}" tuoke-prod-freellmapi-1)"
+             release="$(docker image inspect --format "{{index .Config.Labels \"tuoke.release\"}}" "$image")"
+             test "$state" = running
+             test "$image" = "$expected"
+             test "$release" = relay-balance-request-local-20260810-r1
+             test -n "$image_id"
+             test -f /srv/tuoke-prod/docker-compose.yml
+             docker exec tuoke-prod-freellmapi-1 test -s /app/server/data/freeapi.db
+             compute_hash="$(docker exec tuoke-prod-freellmapi-1 sha256sum /app/server/dist/lib/compute-points-response.js | cut -d " " -f 1)"
+             responses_hash="$(docker exec tuoke-prod-freellmapi-1 sha256sum /app/server/dist/routes/responses.js | cut -d " " -f 1)"
+             admin_hash="$(docker exec tuoke-prod-freellmapi-1 sha256sum /app/server/dist/routes/admin-users.js | cut -d " " -f 1)"
+             test "$compute_hash" = 24d050725cd5bde0a56dc5827579de418a4c51b549a9dadfac486a03ccd9175f
+             test "$responses_hash" = f7c175d4da2ee917874ce98dfab4674a2197ebd3b60d7235349bf1802aa1ec50
+             test "$admin_hash" = c852ad7117221bf0af14750aebec7a4f9dc78f35d76cc15e46d1f2f5a70e990c
+             printf "preflight_state=%s\npreflight_image=%s\npreflight_image_id=%s\n" "$state" "$image" "$image_id"'
+
+      - name: Transfer exact verified payload
+        id: payload
+        run: |
+          remote_archive="/tmp/tuoke-account-compute-usage-${GITHUB_RUN_ID}.tgz"
+          remote_stage="/tmp/tuoke-account-compute-usage-${GITHUB_RUN_ID}"
+          sshpass -e scp \
+            -O \
+            -o BatchMode=no \
+            -o IdentitiesOnly=yes \
+            -o PreferredAuthentications=password \
+            -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=20 \
+            "$PAYLOAD_FILE" "$DEPLOY_USER@$DEPLOY_HOST:$remote_archive"
+          {
+            echo "remote_archive=$remote_archive"
+            echo "remote_stage=$remote_stage"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Deploy with backup and automatic rollback
+        run: |
+          sshpass -e ssh \
+            -o BatchMode=no \
+            -o IdentitiesOnly=yes \
+            -o PreferredAuthentications=password \
+            -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=20 \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            bash -s -- \
+            '${{ steps.payload.outputs.remote_archive }}' \
+            '${{ steps.payload.outputs.remote_stage }}' \
+            "$EXPECTED_SHA256" <<'REMOTE'
+          set -Eeuo pipefail
+          archive="$1"
+          stage="$2"
+          expected_sha="$3"
+          case "$archive" in /tmp/tuoke-account-compute-usage-[0-9]*.tgz) ;; *) exit 91 ;; esac
+          case "$stage" in /tmp/tuoke-account-compute-usage-[0-9]*) ;; *) exit 92 ;; esac
+          test -f "$archive"
+          test ! -e "$stage"
+          printf '%s  %s\n' "$expected_sha" "$archive" | sha256sum -c -
+          install -d -m 0700 "$stage"
+          tar -xzf "$archive" -C "$stage"
+          release_root="$stage/account-compute-usage-20260810-r1"
+          test -f "$release_root/deploy.sh"
+          test -f "$release_root/MANIFEST.sha256"
+          bash "$release_root/deploy.sh"
+          REMOTE
+
+      - name: Verify public production endpoint
+        run: |
+          ping_body="$(curl --fail --silent --show-error --retry 8 --retry-delay 3 --retry-all-errors https://tuokeapi.com/api/ping)"
+          python3 -c 'import json,sys; assert json.loads(sys.argv[1]).get("status") == "ok"' "$ping_body"
+          curl --fail --silent --show-error --retry 8 --retry-delay 3 --retry-all-errors https://tuokeapi.com/ >/dev/null
+          echo public_verification=ok
+
+      - name: Clean temporary remote payload
+        if: always() && steps.payload.outputs.remote_archive != ''
+        run: |
+          sshpass -e ssh \
+            -o BatchMode=no \
+            -o IdentitiesOnly=yes \
+            -o PreferredAuthentications=password \
+            -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=20 \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            rm -rf -- \
+            '${{ steps.payload.outputs.remote_archive }}' \
+            '${{ steps.payload.outputs.remote_stage }}'
