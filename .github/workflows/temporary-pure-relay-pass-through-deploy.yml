@@ -53,7 +53,7 @@ jobs:
             -o StrictHostKeyChecking=yes \
             -o ConnectTimeout=20 \
             "$DEPLOY_USER@$DEPLOY_HOST" \
-            'set -eu; state="$(docker inspect --format "{{.State.Status}}" tuoke-prod-freellmapi-1)"; image="$(docker inspect --format "{{.Config.Image}}" tuoke-prod-freellmapi-1)"; image_id="$(docker inspect --format "{{.Image}}" tuoke-prod-freellmapi-1)"; test "$state" = running; test -n "$image"; test -n "$image_id"; test -f /srv/tuoke-prod/docker-compose.yml; test "$(stat -c %s /var/lib/docker/volumes/tuoke-prod_freellmapi-data/_data/freeapi.db)" -gt 0; printf "preflight_state=%s\npreflight_image=%s\npreflight_image_id=%s\n" "$state" "$image" "$image_id"'
+            'set -eu; state="$(docker inspect --format "{{.State.Status}}" tuoke-prod-freellmapi-1)"; image="$(docker inspect --format "{{.Config.Image}}" tuoke-prod-freellmapi-1)"; image_id="$(docker inspect --format "{{.Image}}" tuoke-prod-freellmapi-1)"; test "$state" = running; test -n "$image"; test -n "$image_id"; test -f /srv/tuoke-prod/docker-compose.yml; docker exec tuoke-prod-freellmapi-1 test -s /app/server/data/freeapi.db; printf "preflight_state=%s\npreflight_image=%s\npreflight_image_id=%s\n" "$state" "$image" "$image_id"'
 
       - name: Transfer exact verified payload
         id: payload
