@@ -19,7 +19,7 @@ jobs:
     env:
       DEPLOY_HOST: 80.253.254.177
       DEPLOY_USER: root
-      EXPECTED_SHA256: edbb1c2e8924dbef02fca2d5b61f5d94bb4a53c5611ce215005e604b61e66785
+      EXPECTED_SHA256: 53e0e32ecc437b3af01e8b439c4e61f2e984a8e991710c3de0705d046aa435bc
       PAYLOAD_FILE: deployment-payload/account-compute-usage-20260810-r1.tgz
       SSHPASS: ${{ secrets.TUOKE_DEPLOY_PASSWORD_RELAY_STABILITY_V2_R1_RETRY_20260809 }}
 
