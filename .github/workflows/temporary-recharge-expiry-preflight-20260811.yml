@@ -58,6 +58,10 @@ jobs:
           image="$(docker inspect --format '{{.Config.Image}}' "$container")"
           image_id="$(docker inspect --format '{{.Image}}' "$container")"
           release="$(docker image inspect --format '{{index .Config.Labels "tuoke.release"}}' "$image")"
+          compose_hash="$(sha256sum "$compose_file" | awk '{print $1}')"
+          state="$(docker inspect --format '{{.State.Status}}' "$container")"
+          health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$container")"
+          restarts="$(docker inspect --format '{{.RestartCount}}' "$container")"
           printf 'compose_sha256=%s\n' "$(sha256sum "$compose_file" | awk '{print $1}')"
           printf 'container_state=%s\n' "$(docker inspect --format '{{.State.Status}}' "$container")"
           printf 'container_health=%s\n' "$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$container")"
@@ -126,4 +130,11 @@ jobs:
               })
               .catch(() => process.exit(1));
           '
+
+          recharge_hash="$(docker exec "$container" sha256sum /app/server/dist/routes/recharge.js | awk '{print $1}')"
+          retention_hash="$(docker exec "$container" sha256sum /app/server/dist/services/recharge-retention.js | awk '{print $1}')"
+          index_hash="$(docker exec "$container" sha256sum /app/server/dist/index.js | awk '{print $1}')"
+          client_asset="$(docker exec "$container" sh -lc 'sed -n "s#.*src=\"\(/assets/index-[^\"]*\.js\)\".*#\1#p" /app/client/dist/index.html | head -n 1')"
+          summary="compose=$compose_hash;state=$state;health=$health;restarts=$restarts;image=$image;image_id=$image_id;release=$release;recharge=$recharge_hash;retention=$retention_hash;index=$index_hash;client=$client_asset"
+          printf '::notice title=Recharge production baseline::%s\n' "$summary"
           REMOTE
