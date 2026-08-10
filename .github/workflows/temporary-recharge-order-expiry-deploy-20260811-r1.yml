@@ -1,0 +1,201 @@
+name: Temporary Tuoke recharge order expiry deployment
+
+on:
+  push:
+    branches:
+      - codex/deploy-recharge-order-expiry-r1-20260811
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tuoke-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      DEPLOY_HOST: 80.253.254.177
+      DEPLOY_USER: root
+      EXPECTED_COMPOSE_SHA256: 1bd13b697102ca2aa01f46ee098b3feb35a2f748a5c8b5cc815ebb0d684f144b
+      EXPECTED_BASE_IMAGE: migration-japan/tuokeapi:20260811-codex-relay-financial-ledger-r2
+      EXPECTED_BASE_ID: sha256:f1fd1af6a2efae5fa82b83a6628a3ffdd2939b90488c94744ca1fa5b9c40d826
+      EXPECTED_BASE_RELEASE: codex-relay-financial-ledger-20260811-r2
+      EXPECTED_PAYLOAD_SHA256: d3739ca1167011f7a4d0105e9132c99ce50a93576c7ddd2af80915e6366984e2
+      EXPECTED_CLIENT_JS_SHA256: 76ab04b5aa702fbfb5c1a1fe5af372eb797e0e7064937378e1e33c6d532ba04f
+      EXPECTED_CLIENT_CSS_SHA256: 6f2741eaf5c5e4d3cb0ec87688a4141ae47b97bb3052b91cb00422d31f1b6a9c
+      PAYLOAD_FILE: deployment-payload/recharge-order-expiry-20260811-r1.tgz
+      SSHPASS: ${{ secrets.TUOKE_DEPLOY_PASSWORD_RELAY_STABILITY_V2_R1_RETRY_20260809 }}
+
+    steps:
+      - name: Check out immutable deployment payload
+        uses: actions/checkout@v4
+
+      - name: Verify exact payload hash
+        run: |
+          set -Eeuo pipefail
+          test -n "$SSHPASS"
+          actual_sha="$(sha256sum "$PAYLOAD_FILE" | awk '{print $1}')"
+          test "$actual_sha" = "$EXPECTED_PAYLOAD_SHA256"
+          echo payload_sha256_verified=true
+
+      - name: Install SSH client helper
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass
+
+      - name: Pin production host identity
+        run: |
+          set -Eeuo pipefail
+          install -d -m 0700 "$HOME/.ssh"
+          printf '%s\n' '80.253.254.177 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJS003ozsuy8Lbn3Km0Nf/ixxJEFTpLV8aiBEIHc/IO5' > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/known_hosts"
+
+      - name: Verify exact production baseline
+        run: |
+          set -Eeuo pipefail
+          sshpass -e ssh \
+            -o BatchMode=no \
+            -o IdentitiesOnly=yes \
+            -o PreferredAuthentications=password \
+            -o PubkeyAuthentication=no \
+            -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=20 \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            bash -s -- \
+            "$EXPECTED_COMPOSE_SHA256" \
+            "$EXPECTED_BASE_IMAGE" \
+            "$EXPECTED_BASE_ID" \
+            "$EXPECTED_BASE_RELEASE" <<'REMOTE'
+          set -Eeuo pipefail
+          expected_compose_sha="$1"
+          expected_image="$2"
+          expected_image_id="$3"
+          expected_release="$4"
+          container='tuoke-prod-freellmapi-1'
+          compose_file='/srv/tuoke-prod/docker-compose.yml'
+          compose_project='tuoke-prod'
+
+          test -f "$compose_file"
+          test "$(sha256sum "$compose_file" | awk '{print $1}')" = "$expected_compose_sha"
+          docker compose -p "$compose_project" -f "$compose_file" config -q
+          test "$(docker inspect --format '{{.State.Status}}' "$container")" = running
+          test "$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$container")" = healthy
+          test "$(docker inspect --format '{{.RestartCount}}' "$container")" = 0
+          test "$(docker inspect --format '{{.Config.Image}}' "$container")" = "$expected_image"
+          test "$(docker inspect --format '{{.Image}}' "$container")" = "$expected_image_id"
+          test "$(docker image inspect --format '{{.Id}}' "$expected_image")" = "$expected_image_id"
+          test "$(docker image inspect --format '{{index .Config.Labels "tuoke.release"}}' "$expected_image")" = "$expected_release"
+          docker exec "$container" test -s /app/server/data/freeapi.db
+          docker exec "$container" node -e '
+            fetch("http://127.0.0.1:3001/api/ping")
+              .then(async response => {
+                const body = await response.json();
+                if (!response.ok || body.status !== "ok") process.exit(1);
+              })
+              .catch(() => process.exit(1));
+          '
+          echo production_baseline_verified=true
+          REMOTE
+
+      - name: Transfer exact verified payload
+        id: payload
+        run: |
+          set -Eeuo pipefail
+          remote_archive="/tmp/tuoke-recharge-order-expiry-${GITHUB_RUN_ID}.tgz"
+          remote_stage="/tmp/tuoke-recharge-order-expiry-${GITHUB_RUN_ID}"
+          sshpass -e scp \
+            -O \
+            -o BatchMode=no \
+            -o IdentitiesOnly=yes \
+            -o PreferredAuthentications=password \
+            -o PubkeyAuthentication=no \
+            -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=20 \
+            "$PAYLOAD_FILE" "$DEPLOY_USER@$DEPLOY_HOST:$remote_archive"
+          {
+            echo "remote_archive=$remote_archive"
+            echo "remote_stage=$remote_stage"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Deploy with backup and automatic rollback
+        run: |
+          set -Eeuo pipefail
+          sshpass -e ssh \
+            -o BatchMode=no \
+            -o IdentitiesOnly=yes \
+            -o PreferredAuthentications=password \
+            -o PubkeyAuthentication=no \
+            -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=20 \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            bash -s -- \
+            '${{ steps.payload.outputs.remote_archive }}' \
+            '${{ steps.payload.outputs.remote_stage }}' \
+            "$EXPECTED_PAYLOAD_SHA256" <<'REMOTE'
+          set -Eeuo pipefail
+          umask 077
+          archive="$1"
+          stage="$2"
+          expected_sha="$3"
+          case "$archive" in /tmp/tuoke-recharge-order-expiry-[0-9]*.tgz) ;; *) exit 91 ;; esac
+          case "$stage" in /tmp/tuoke-recharge-order-expiry-[0-9]*) ;; *) exit 92 ;; esac
+          test -f "$archive"
+          test ! -e "$stage"
+          printf '%s  %s\n' "$expected_sha" "$archive" | sha256sum -c -
+          install -d -m 0700 "$stage"
+          tar -xzf "$archive" -C "$stage"
+          release_root="$stage/recharge-order-expiry-20260811-r1"
+          test -f "$release_root/deploy.sh"
+          test -f "$release_root/MANIFEST.sha256"
+          test -f "$release_root/RELEASE.txt"
+          (cd "$release_root" && sha256sum -c MANIFEST.sha256)
+          bash "$release_root/deploy.sh"
+          REMOTE
+
+      - name: Verify public production endpoint and assets
+        run: |
+          set -Eeuo pipefail
+          js_file="$(mktemp)"
+          css_file="$(mktemp)"
+          trap 'rm -f -- "$js_file" "$css_file"' EXIT
+          verified=0
+          for attempt in $(seq 1 20); do
+            stamp="${GITHUB_RUN_ID}-${attempt}"
+            if ping_body="$(curl --fail --silent --show-error --connect-timeout 10 --max-time 30 "https://tuokeapi.com/api/ping?v=$stamp")" \
+              && python3 -c 'import json,sys; assert json.loads(sys.argv[1]).get("status") == "ok"' "$ping_body" \
+              && home_html="$(curl --fail --silent --show-error --connect-timeout 10 --max-time 30 "https://tuokeapi.com/?v=$stamp")" \
+              && grep -Fq '/assets/index-recharge-expiry-r1.js' <<< "$home_html" \
+              && grep -Fq '/assets/index-Cbkhjyuo.css' <<< "$home_html" \
+              && curl --fail --silent --show-error --connect-timeout 10 --max-time 30 "https://tuokeapi.com/assets/index-recharge-expiry-r1.js?v=$stamp" -o "$js_file" \
+              && curl --fail --silent --show-error --connect-timeout 10 --max-time 30 "https://tuokeapi.com/assets/index-Cbkhjyuo.css?v=$stamp" -o "$css_file" \
+              && test "$(sha256sum "$js_file" | awk '{print $1}')" = "$EXPECTED_CLIENT_JS_SHA256" \
+              && test "$(sha256sum "$css_file" | awk '{print $1}')" = "$EXPECTED_CLIENT_CSS_SHA256"; then
+              verified=1
+              break
+            fi
+            sleep 3
+          done
+          test "$verified" -eq 1
+          echo public_verification=ok
+
+      - name: Clean temporary remote payload
+        if: always() && steps.payload.outputs.remote_archive != ''
+        run: |
+          set -Eeuo pipefail
+          archive='${{ steps.payload.outputs.remote_archive }}'
+          stage='${{ steps.payload.outputs.remote_stage }}'
+          case "$archive" in /tmp/tuoke-recharge-order-expiry-[0-9]*.tgz) ;; *) exit 91 ;; esac
+          case "$stage" in /tmp/tuoke-recharge-order-expiry-[0-9]*) ;; *) exit 92 ;; esac
+          sshpass -e ssh \
+            -o BatchMode=no \
+            -o IdentitiesOnly=yes \
+            -o PreferredAuthentications=password \
+            -o PubkeyAuthentication=no \
+            -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=20 \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            rm -rf -- "$archive" "$stage"
