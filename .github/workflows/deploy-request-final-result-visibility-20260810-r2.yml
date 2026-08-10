@@ -68,7 +68,7 @@ jobs:
           install -d -m 0700 "$release"
           tar -xzf "$archive" -C "$release" --strip-components=1
           chmod 0700 "$release/deploy.sh"
-          bash "$release/deploy.sh"
+          PS4='+ deploy.sh:${LINENO}: ' bash -x "$release/deploy.sh"
           REMOTE
 
       - name: Confirm public service health
