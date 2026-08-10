@@ -1,0 +1,77 @@
+name: Deploy Request Final Result Visibility 20260810 R2
+
+on:
+  push:
+    branches:
+      - codex/deploy-request-final-result-visibility-20260810-r2
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SSHPASS: ${{ secrets.TUOKE_DEPLOY_PASSWORD_RELAY_STABILITY_V2_R1_RETRY_20260809 || secrets.TUOKE_DEPLOY_PASSWORD_RELAY_STABILITY_V2_DIAG_20260809 }}
+      DEPLOY_HOST: 80.253.254.177
+      RELEASE_ARCHIVE: deployment/request-final-result-visibility-20260810-r2.tgz
+      REMOTE_ARCHIVE: /root/request-final-result-visibility-20260810-r2.tgz
+      REMOTE_RELEASE: /root/request-final-result-visibility-20260810-r2
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SSH client helper
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends sshpass
+
+      - name: Configure verified production host key
+        run: |
+          set -Eeuo pipefail
+          install -d -m 0700 "$HOME/.ssh"
+          cat > "$HOME/.ssh/known_hosts" <<'EOF'
+          80.253.254.177 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJS003ozsuy8Lbn3Km0Nf/ixxJEFTpLV8aiBEIHc/IO5
+          EOF
+          chmod 0600 "$HOME/.ssh/known_hosts"
+
+      - name: Upload verified release archive
+        run: |
+          set -Eeuo pipefail
+          test -n "$SSHPASS" || { echo "deployment password secret is unavailable" >&2; exit 1; }
+          test -s "$RELEASE_ARCHIVE"
+          sshpass -e scp \
+            -o BatchMode=no \
+            -o PreferredAuthentications=password \
+            -o PubkeyAuthentication=no \
+            -o StrictHostKeyChecking=yes \
+            "$RELEASE_ARCHIVE" "root@$DEPLOY_HOST:$REMOTE_ARCHIVE"
+
+      - name: Deploy with database backup and automatic rollback
+        run: |
+          set -Eeuo pipefail
+          sshpass -e ssh \
+            -o BatchMode=no \
+            -o PreferredAuthentications=password \
+            -o PubkeyAuthentication=no \
+            -o StrictHostKeyChecking=yes \
+            "root@$DEPLOY_HOST" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+          release='/root/request-final-result-visibility-20260810-r2'
+          archive='/root/request-final-result-visibility-20260810-r2.tgz'
+          test -s "$archive"
+          rm -rf -- "$release"
+          install -d -m 0700 "$release"
+          tar -xzf "$archive" -C "$release" --strip-components=1
+          chmod 0700 "$release/deploy.sh"
+          bash "$release/deploy.sh"
+          REMOTE
+
+      - name: Confirm public service health
+        run: |
+          set -Eeuo pipefail
+          curl --fail --silent --show-error --retry 5 --retry-all-errors \
+            https://tuokeapi.com/api/ping
