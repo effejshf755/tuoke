@@ -133,8 +133,15 @@ jobs:
 
           recharge_hash="$(docker exec "$container" sha256sum /app/server/dist/routes/recharge.js | awk '{print $1}')"
           retention_hash="$(docker exec "$container" sha256sum /app/server/dist/services/recharge-retention.js | awk '{print $1}')"
+          alipay_hash="$(docker exec "$container" sha256sum /app/server/dist/services/alipay.js | awk '{print $1}')"
+          promotion_hash="$(docker exec "$container" sha256sum /app/server/dist/services/promotion-offers.js | awk '{print $1}')"
           index_hash="$(docker exec "$container" sha256sum /app/server/dist/index.js | awk '{print $1}')"
+          relay_route_hash="$(docker exec "$container" sha256sum /app/server/dist/routes/codex-relay-sources.js | awk '{print $1}')"
+          ledger_hash="$(docker exec "$container" sha256sum /app/server/dist/services/codex-relay-financial-ledger.js | awk '{print $1}')"
+          defaults_hash="$(docker exec "$container" sha256sum /app/server/dist/db/migrate/defaults.js | awk '{print $1}')"
+          client_index_hash="$(docker exec "$container" sha256sum /app/client/dist/index.html | awk '{print $1}')"
           client_asset="$(docker exec "$container" sh -lc 'sed -n "s#.*src=\"\(/assets/index-[^\"]*\.js\)\".*#\1#p" /app/client/dist/index.html | head -n 1')"
-          summary="compose=$compose_hash;state=$state;health=$health;restarts=$restarts;image=$image;image_id=$image_id;release=$release;recharge=$recharge_hash;retention=$retention_hash;index=$index_hash;client=$client_asset"
+          client_css_hash="$(docker exec "$container" sh -lc 'css_asset=$(sed -n "s#.*href=\"\(/assets/index-[^\"]*\.css\)\".*#\1#p" /app/client/dist/index.html | head -n 1); sha256sum "/app/client/dist$css_asset" | awk "{print \$1}"')"
+          summary="compose=$compose_hash;state=$state;health=$health;restarts=$restarts;image=$image;image_id=$image_id;release=$release;recharge=$recharge_hash;retention=$retention_hash;alipay=$alipay_hash;promotion=$promotion_hash;index=$index_hash;relay_route=$relay_route_hash;ledger=$ledger_hash;defaults=$defaults_hash;client_index=$client_index_hash;client=$client_asset;client_css=$client_css_hash"
           printf '::notice title=Recharge production baseline::%s\n' "$summary"
           REMOTE
