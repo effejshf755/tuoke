@@ -1,0 +1,129 @@
+name: Temporary Recharge Expiry Production Preflight 20260811
+
+on:
+  push:
+    branches:
+      - codex/diag-recharge-expiry-r1-20260811
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tuoke-production-preflight
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DEPLOY_HOST: 80.253.254.177
+      SSHPASS: ${{ secrets.TUOKE_DEPLOY_PASSWORD_RELAY_STABILITY_V2_R1_RETRY_20260809 }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SSH helper
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass
+
+      - name: Pin production host identity
+        run: |
+          set -Eeuo pipefail
+          install -d -m 0700 "$HOME/.ssh"
+          printf '%s\n' '80.253.254.177 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJS003ozsuy8Lbn3Km0Nf/ixxJEFTpLV8aiBEIHc/IO5' > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/known_hosts"
+
+      - name: Inspect current production without writes
+        run: |
+          set -Eeuo pipefail
+          test -n "$SSHPASS"
+          sshpass -e ssh \
+            -o BatchMode=no \
+            -o IdentitiesOnly=yes \
+            -o PreferredAuthentications=password \
+            -o PubkeyAuthentication=no \
+            -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=20 \
+            "root@$DEPLOY_HOST" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+          container='tuoke-prod-freellmapi-1'
+          compose_file='/srv/tuoke-prod/docker-compose.yml'
+          compose_project='tuoke-prod'
+
+          test -f "$compose_file"
+          docker compose -p "$compose_project" -f "$compose_file" config -q
+          image="$(docker inspect --format '{{.Config.Image}}' "$container")"
+          image_id="$(docker inspect --format '{{.Image}}' "$container")"
+          release="$(docker image inspect --format '{{index .Config.Labels "tuoke.release"}}' "$image")"
+          printf 'compose_sha256=%s\n' "$(sha256sum "$compose_file" | awk '{print $1}')"
+          printf 'container_state=%s\n' "$(docker inspect --format '{{.State.Status}}' "$container")"
+          printf 'container_health=%s\n' "$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$container")"
+          printf 'container_restarts=%s\n' "$(docker inspect --format '{{.RestartCount}}' "$container")"
+          printf 'image=%s\nimage_id=%s\nrelease=%s\n' "$image" "$image_id" "$release"
+
+          docker exec "$container" sh -lc '
+            set -eu
+            for path in \
+              /app/server/dist/routes/recharge.js \
+              /app/server/dist/routes/recharge.js.map \
+              /app/server/dist/services/recharge-retention.js \
+              /app/server/dist/services/recharge-retention.js.map \
+              /app/server/dist/services/alipay.js \
+              /app/server/dist/services/promotion-offers.js \
+              /app/server/dist/index.js \
+              /app/client/dist/index.html; do
+              test -s "$path"
+              sha256sum "$path"
+            done
+            js_asset="$(sed -n "s#.*src=\"\(/assets/index-[^\"]*\.js\)\".*#\1#p" /app/client/dist/index.html | head -n 1)"
+            css_asset="$(sed -n "s#.*href=\"\(/assets/index-[^\"]*\.css\)\".*#\1#p" /app/client/dist/index.html | head -n 1)"
+            test -n "$js_asset"
+            test -n "$css_asset"
+            printf "client_js=%s\nclient_css=%s\n" "$js_asset" "$css_asset"
+            sha256sum "/app/client/dist$js_asset" "/app/client/dist$css_asset"
+            grep -Fq "startRechargeOrderCleanup" /app/server/dist/index.js && echo scheduler_import=ok
+            grep -Fq "status IN ('"'"'pending'"'"','"'"'cancelled'"'"','"'"'expired'"'"')" /app/server/dist/services/alipay.js && echo alipay_late_settlement=ok
+            grep -Fq "status IN (" /app/server/dist/routes/recharge.js && echo manual_late_settlement=present
+            if test -n "${RECHARGE_ORDER_EXPIRY_MINUTES:-}"; then
+              case "$RECHARGE_ORDER_EXPIRY_MINUTES" in *[!0-9]*) exit 81 ;; esac
+              printf "recharge_expiry_minutes=%s\n" "$RECHARGE_ORDER_EXPIRY_MINUTES"
+            else
+              echo recharge_expiry_minutes=unset
+            fi
+          '
+
+          docker exec -i "$container" node --input-type=module - <<'NODE'
+          import Database from 'better-sqlite3';
+          const db = new Database('/app/server/data/freeapi.db', { readonly: true, fileMustExist: true });
+          const quick = db.pragma('quick_check', { simple: true });
+          if (quick !== 'ok') throw new Error(`quick_check failed: ${quick}`);
+          const scalar = (sql) => Number(db.prepare(sql).get()?.value ?? 0);
+          const rechargeColumns = new Set(db.prepare('PRAGMA table_info(recharge_orders)').all().map((row) => row.name));
+          const walletColumns = new Set(db.prepare('PRAGMA table_info(wallet_transactions)').all().map((row) => row.name));
+          for (const name of ['promotion_offer_id', 'offer_code_snapshot', 'wallet_credit_micro', 'promotion_credit_micro', 'promotion_validity_seconds', 'payment_reference', 'proof_submitted_at']) {
+            if (!rechargeColumns.has(name)) throw new Error(`missing recharge_orders.${name}`);
+          }
+          if (!walletColumns.has('recharge_order_id')) throw new Error('missing wallet_transactions.recharge_order_id');
+          const latest = db.prepare('SELECT filename FROM migrations ORDER BY id DESC LIMIT 1').get()?.filename ?? 'none';
+          console.log(`database_quick_check=${quick}`);
+          console.log(`latest_migration=${latest}`);
+          console.log(`pending_total=${scalar("SELECT COUNT(*) AS value FROM recharge_orders WHERE status = 'pending'")}`);
+          console.log(`pending_older_than_10m=${scalar("SELECT COUNT(*) AS value FROM recharge_orders WHERE status = 'pending' AND datetime(created_at) <= datetime('now', '-10 minutes')")}`);
+          console.log(`pending_older_than_10m_with_proof=${scalar("SELECT COUNT(*) AS value FROM recharge_orders WHERE status = 'pending' AND datetime(created_at) <= datetime('now', '-10 minutes') AND payment_method = 'manual' AND proof_submitted_at IS NOT NULL")}`);
+          console.log(`paid_orders=${scalar("SELECT COUNT(*) AS value FROM recharge_orders WHERE status = 'paid'")}`);
+          db.close();
+          NODE
+
+          docker exec "$container" node -e '
+            fetch("http://127.0.0.1:3001/api/ping")
+              .then(async response => {
+                const body = await response.json();
+                if (!response.ok || body.status !== "ok") process.exit(1);
+                console.log("container_ping=ok");
+              })
+              .catch(() => process.exit(1));
+          '
+          REMOTE
