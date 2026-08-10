@@ -44,6 +44,7 @@ jobs:
           test -n "$SSHPASS" || { echo "deployment password secret is unavailable" >&2; exit 1; }
           test -s "$RELEASE_ARCHIVE"
           sshpass -e scp \
+            -O \
             -o BatchMode=no \
             -o PreferredAuthentications=password \
             -o PubkeyAuthentication=no \
