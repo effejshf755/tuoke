@@ -23,7 +23,7 @@ jobs:
       EXPECTED_BASE_IMAGE: migration-japan/tuokeapi:20260811-codex-relay-financial-ledger-r2
       EXPECTED_BASE_ID: sha256:f1fd1af6a2efae5fa82b83a6628a3ffdd2939b90488c94744ca1fa5b9c40d826
       EXPECTED_BASE_RELEASE: codex-relay-financial-ledger-20260811-r2
-      EXPECTED_PAYLOAD_SHA256: d3739ca1167011f7a4d0105e9132c99ce50a93576c7ddd2af80915e6366984e2
+      EXPECTED_PAYLOAD_SHA256: ff8d9fa068ee8b219563d52e951fd9e49aa1aeeabeaf2aee1783b8d43db4fb05
       EXPECTED_CLIENT_JS_SHA256: 76ab04b5aa702fbfb5c1a1fe5af372eb797e0e7064937378e1e33c6d532ba04f
       EXPECTED_CLIENT_CSS_SHA256: 6f2741eaf5c5e4d3cb0ec87688a4141ae47b97bb3052b91cb00422d31f1b6a9c
       PAYLOAD_FILE: deployment-payload/recharge-order-expiry-20260811-r1.tgz
