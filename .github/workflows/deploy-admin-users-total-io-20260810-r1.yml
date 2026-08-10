@@ -17,7 +17,7 @@ jobs:
       SSHPASS: ${{ secrets.TUOKE_DEPLOY_PASSWORD_RELAY_STABILITY_V2_R1_RETRY_20260809 || secrets.TUOKE_DEPLOY_PASSWORD_RELAY_STABILITY_V2_DIAG_20260809 }}
       DEPLOY_HOST: 80.253.254.177
       RELEASE_ARCHIVE: deployment/admin-users-total-io-20260810-r1.tgz
-      RELEASE_SHA256: 27d8ab7a6471c351029fe87d3afb2b1925d7d920db44075d4f51c7b749fc23ce
+      RELEASE_SHA256: 6ee10e4c41245e0f080bb838b0ced05dae92fc2a7f0c121c6d181cb9fb9c44cb
       REMOTE_ARCHIVE: /root/admin-users-total-io-20260810-r1.tgz
       REMOTE_RELEASE: /root/admin-users-total-io-20260810-r1
 
@@ -65,7 +65,7 @@ jobs:
           set -Eeuo pipefail
           release='/root/admin-users-total-io-20260810-r1'
           archive='/root/admin-users-total-io-20260810-r1.tgz'
-          expected_sha='27d8ab7a6471c351029fe87d3afb2b1925d7d920db44075d4f51c7b749fc23ce'
+          expected_sha='6ee10e4c41245e0f080bb838b0ced05dae92fc2a7f0c121c6d181cb9fb9c44cb'
           test -s "$archive"
           printf '%s  %s\n' "$expected_sha" "$archive" | sha256sum -c -
           rm -rf -- "$release"
