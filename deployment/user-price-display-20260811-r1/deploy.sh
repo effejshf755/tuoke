@@ -7,7 +7,7 @@ COMPOSE_PROJECT="tuoke-prod"
 COMPOSE_SERVICE="freellmapi"
 DATA_VOLUME="tuoke-prod_freellmapi-data"
 PUBLIC_ORIGIN="https://tuokeapi.com"
-EXPECTED_COMPOSE_HASH="57a5b40618171a37c61b5c196437a13e61f246f886c3eebe96e8e8eb8c25edcc"
+EXPECTED_COMPOSE_HASH="8d6916e95e05e0f032ec6896d80e77ac38f496f9e5550ee628d2c5b0f90b2fb7"
 EXPECTED_BASE_IMAGE="migration-japan/tuokeapi:20260811-admin-users-real-token-r2"
 EXPECTED_BASE_IMAGE_ID="sha256:490814758d792e5f7538b062ff9eddc5d5676a125f4ee41ef4ce072af44e0496"
 EXPECTED_BASE_RELEASE="admin-users-real-token-20260811-r2"
@@ -140,7 +140,20 @@ import { createApp } from "/app/server/dist/app.js";
 initDb(":memory:");
 const user = createUser("display-price-user@example.test", "password123");
 const db = getDb();
-const modelId = "gpt-5.6-sol";
+const modelId = "display-price-contract-model";
+db.prepare(`
+  INSERT INTO models (
+    platform, model_id, display_name, intelligence_rank, speed_rank,
+    size_label, monthly_token_budget, enabled, supports_vision, supports_tools
+  ) VALUES ('openai-codex', ?, ?, 50, 50, '', '', 1, 0, 1)
+`).run(modelId, modelId);
+db.prepare(`
+  INSERT INTO model_billing_rules (
+    platform, model_id, input_price_micro_per_million,
+    output_price_micro_per_million, multiplier_milli,
+    cached_input_multiplier_milli, billing_enabled
+  ) VALUES ('openai-codex', ?, 3000000, 10000000, 500, 100, 1)
+`).run(modelId);
 const groupId = Number(db.prepare(`
   INSERT INTO codex_groups (name, description, enabled, multiplier_milli)
   VALUES ('Display price test', 'isolated', 1, 2000)
@@ -192,13 +205,18 @@ async function readPricing() {
 try {
   db.prepare('UPDATE users SET billing_multiplier_milli = 0 WHERE id = ?').run(user.userId);
   const zeroPricing = await readPricing();
-  if (JSON.stringify(zeroPricing) !== JSON.stringify({
+  const expectedPricing = {
     modelId,
     inputPricePerMillion: 1.5,
-    cachedInputPricePerMillion: 0.15,
     outputPricePerMillion: 5,
+    cachedInputPricePerMillion: 0.15,
     effectiveMultiplier: 0.5,
-  })) throw new Error(`unexpected normal display price: ${JSON.stringify(zeroPricing)}`);
+  };
+  for (const [field, expected] of Object.entries(expectedPricing)) {
+    if (zeroPricing[field] !== expected) {
+      throw new Error(`unexpected normal display price: ${JSON.stringify({ field, expected, zeroPricing })}`);
+    }
+  }
   db.prepare('UPDATE users SET billing_multiplier_milli = 1500 WHERE id = ?').run(user.userId);
   const customPricing = await readPricing();
   if (JSON.stringify(customPricing) !== JSON.stringify(zeroPricing)) {
