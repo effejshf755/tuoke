@@ -1,0 +1,8 @@
+Release: user-price-display-20260811-r1
+Base image: migration-japan/tuokeapi:20260811-admin-users-real-token-r2
+Scope: consumer Codex group price display only
+
+Behavior:
+- Public group/model prices do not include users.billing_multiplier_milli.
+- User billing multiplier remains active in settlement and reservation paths.
+- No client bundle, pricing configuration, database schema, or wallet logic changes.
