@@ -1,0 +1,104 @@
+name: Export Production NewAPI Migration Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type EXPORT_FRESH_MAINTENANCE_SNAPSHOT to confirm the encrypted live snapshot export
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tuoke-production-readonly-export
+  cancel-in-progress: false
+
+jobs:
+  encrypted-export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SSHPASS: ${{ secrets.TUOKE_DEPLOY_PASSWORD_RELAY_STABILITY_V2_R1_RETRY_20260809 || secrets.TUOKE_DEPLOY_PASSWORD_RELAY_STABILITY_V2_DIAG_20260809 }}
+      DEPLOY_HOST: 80.253.254.177
+      EXPORT_CONFIRMATION: ${{ inputs.confirmation }}
+      RECIPIENT_PUBLIC_KEY: deployment/newapi-export/recipient-public-key.pem
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fail-closed export authorization and public-key validation
+        run: |
+          set -Eeuo pipefail
+          test "$EXPORT_CONFIRMATION" = 'EXPORT_FRESH_MAINTENANCE_SNAPSHOT'
+          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]{0,19}$ ]]
+          [[ "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]{0,9}$ ]]
+          [[ "$GITHUB_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test -n "$SSHPASS" || { echo 'production credential is unavailable' >&2; exit 1; }
+          test -s "$RECIPIENT_PUBLIC_KEY" || {
+            echo 'recipient public key has not been committed; export remains disabled' >&2
+            exit 1
+          }
+          grep -Fq -- '-----BEGIN PUBLIC KEY-----' "$RECIPIENT_PUBLIC_KEY"
+          ! grep -Fq -- 'PRIVATE KEY' "$RECIPIENT_PUBLIC_KEY"
+          openssl pkey -pubin -in "$RECIPIENT_PUBLIC_KEY" -noout -text \
+            | grep -Eq 'Public-Key: \((2048|3072|4096|[5-9][0-9]{3,}) bit\)'
+          test -s scripts/export-production-newapi-encrypted.sh
+          test -s scripts/build-newapi-export-manifest.mjs
+          test -s scripts/verify-production-newapi-export.mjs
+
+      - name: Install SSH helper
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends sshpass
+
+      - name: Configure pinned production host key
+        run: |
+          set -Eeuo pipefail
+          install -d -m 0700 "$HOME/.ssh"
+          cat > "$HOME/.ssh/known_hosts" <<'EOF'
+          80.253.254.177 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJS003ozsuy8Lbn3Km0Nf/ixxJEFTpLV8aiBEIHc/IO5
+          EOF
+          chmod 0600 "$HOME/.ssh/known_hosts"
+
+      - name: Create encrypted package from a fresh maintenance snapshot
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          install -d -m 0700 artifacts
+          package="artifacts/tuoke-newapi-export-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.enc.json"
+          public_key_b64="$(base64 -w 0 "$RECIPIENT_PUBLIC_KEY")"
+          [[ "$public_key_b64" =~ ^[A-Za-z0-9+/]+={0,2}$ ]]
+          sshpass -e ssh \
+            -o BatchMode=no \
+            -o PreferredAuthentications=password \
+            -o PubkeyAuthentication=no \
+            -o StrictHostKeyChecking=yes \
+            "root@$DEPLOY_HOST" "bash -s -- '$public_key_b64' '$GITHUB_RUN_ID' '$GITHUB_RUN_ATTEMPT' '$GITHUB_REPOSITORY' '$GITHUB_SHA'" \
+            < scripts/export-production-newapi-encrypted.sh > "$package"
+          unset public_key_b64
+          test -s "$package"
+
+      - name: Validate ciphertext and create non-sensitive manifest
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          package="artifacts/tuoke-newapi-export-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.enc.json"
+          manifest="artifacts/tuoke-newapi-export-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.manifest.json"
+          node scripts/build-newapi-export-manifest.mjs "$package" "$manifest"
+          test -s "$manifest"
+          sha256sum "$package" "$manifest"
+
+      - name: Upload encrypted migration package only
+        uses: actions/upload-artifact@v4
+        with:
+          name: tuoke-newapi-encrypted-export-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            artifacts/tuoke-newapi-export-${{ github.run_id }}-${{ github.run_attempt }}.enc.json
+            artifacts/tuoke-newapi-export-${{ github.run_id }}-${{ github.run_attempt }}.manifest.json
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 0
