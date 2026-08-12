@@ -176,6 +176,7 @@ EXPORT_SNAPSHOT_CREATED_AT="$SNAPSHOT_CREATED_AT" \
 docker run --rm -i \
   --network none \
   --read-only \
+  --user 0:0 \
   --cap-drop ALL \
   --security-opt no-new-privileges \
   --pids-limit 64 \
