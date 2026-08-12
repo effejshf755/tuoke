@@ -1,9 +1,6 @@
 name: Export Production NewAPI Migration Package
 
 on:
-  push:
-    branches:
-      - codex/export-newapi-migration-20260812
   workflow_dispatch:
     inputs:
       confirmation:
@@ -25,7 +22,7 @@ jobs:
     env:
       SSHPASS: ${{ secrets.TUOKE_DEPLOY_PASSWORD_RELAY_STABILITY_V2_R1_RETRY_20260809 || secrets.TUOKE_DEPLOY_PASSWORD_RELAY_STABILITY_V2_DIAG_20260809 }}
       DEPLOY_HOST: 80.253.254.177
-      EXPORT_CONFIRMATION: ${{ github.event_name == 'push' && 'EXPORT_FRESH_MAINTENANCE_SNAPSHOT' || inputs.confirmation }}
+      EXPORT_CONFIRMATION: ${{ inputs.confirmation }}
       RECIPIENT_PUBLIC_KEY: deployment/newapi-export/recipient-public-key.pem
 
     steps:

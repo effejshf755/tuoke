@@ -21,9 +21,9 @@ openssl pkey -in recipient-private-key.pem -pubout -out recipient-public-key.pem
 ```
 
 The private key must not be added to this repository, GitHub Actions, the
-production server, logs, or artifacts. A manual run requires the exact
-confirmation phrase `EXPORT_FRESH_MAINTENANCE_SNAPSHOT`; the migration branch
-also has a temporary push trigger used to run this one-time export.
+production server, logs, or artifacts. The export can only be started manually
+with `workflow_dispatch`, and requires the exact confirmation phrase
+`EXPORT_FRESH_MAINTENANCE_SNAPSHOT`.
 
 After confirming that the live database is in maintenance mode, the export
 creates a fresh online SQLite snapshot for that GitHub Actions run. The source
