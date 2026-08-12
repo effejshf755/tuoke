@@ -1,0 +1,20 @@
+Release: user-usage-privacy-20260812-r1
+Deployment mode: verified runtime overlay on the currently running production image
+
+Scope:
+- Ordinary-user usage summary, analytics, request history, wallet history,
+  API Key statistics, resource usage, and Playground history.
+- Global raw token budget endpoint is administrator-only.
+- Ordinary-user frontend labels are neutral and Playground avoids double conversion.
+- Admin analytics and admin real-token views are unchanged.
+
+Data policy:
+- Use each request's persisted input/output compute-point snapshot.
+- Derive cached input using that same request's persisted multiplier snapshot.
+- Missing historical snapshots return zero and never fall back to raw tokens.
+
+Release safety:
+- No database migration.
+- Deployment backs up the production SQLite database and current compose file.
+- Candidate is tested against an in-memory database before switching.
+- The previous production image remains the automatic rollback target.
