@@ -1,0 +1,60 @@
+name: Enable Production Maintenance 20260812
+
+on:
+  push:
+    branches:
+      - codex/enable-maintenance-20260812
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tuoke-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  maintenance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SSHPASS: ${{ secrets.TUOKE_DEPLOY_PASSWORD_RELAY_STABILITY_V2_R1_RETRY_20260809 || secrets.TUOKE_DEPLOY_PASSWORD_RELAY_STABILITY_V2_DIAG_20260809 }}
+      DEPLOY_HOST: 80.253.254.177
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SSH helper
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends sshpass
+
+      - name: Configure verified production host key
+        run: |
+          set -Eeuo pipefail
+          install -d -m 0700 "$HOME/.ssh"
+          cat > "$HOME/.ssh/known_hosts" <<'EOF'
+          80.253.254.177 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJS003ozsuy8Lbn3Km0Nf/ixxJEFTpLV8aiBEIHc/IO5
+          EOF
+          chmod 0600 "$HOME/.ssh/known_hosts"
+
+      - name: Enable verified maintenance mode with rollback
+        run: |
+          set -Eeuo pipefail
+          test -n "$SSHPASS" || { echo 'production credential is unavailable' >&2; exit 1; }
+          test -s scripts/enable-production-maintenance.sh
+          sshpass -e ssh \
+            -o BatchMode=no \
+            -o PreferredAuthentications=password \
+            -o PubkeyAuthentication=no \
+            -o StrictHostKeyChecking=yes \
+            "root@$DEPLOY_HOST" 'bash -s' < scripts/enable-production-maintenance.sh
+
+      - name: Confirm public maintenance state
+        run: |
+          set -Eeuo pipefail
+          settings="$(curl --fail --silent --show-error --retry 5 --retry-all-errors https://tuokeapi.com/api/public/settings)"
+          grep -Eq '"maintenance_mode"[[:space:]]*:[[:space:]]*true' <<<"$settings"
+          homepage="$(curl --fail --silent --show-error --retry 5 --retry-all-errors "https://tuokeapi.com/?maintenance=${GITHUB_RUN_ID}")"
+          grep -Fq 'TUOKE_PRODUCTION_MAINTENANCE_20260812' <<<"$homepage"
