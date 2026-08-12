@@ -371,7 +371,7 @@ test "$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{e
 test "$(docker image inspect --format '{{index .Config.Labels "tuoke.release"}}' "$NEW_IMAGE")" = "$RELEASE_LABEL"
 test "$(docker inspect --format '{{.RestartCount}}' "$CONTAINER")" = 0
 
-docker exec "$CONTAINER" sh -lc '
+docker exec -i "$CONTAINER" sh -s <<'LIVE_RUNTIME_CHECK'
   set -eu
   node --check /app/server/dist/routes/user.js
   node --check /app/server/dist/routes/user-analytics.js
@@ -390,7 +390,7 @@ docker exec "$CONTAINER" sh -lc '
   grep -Fq 'const inputUsage = `CASE' /app/server/dist/routes/user-analytics.js
   grep -Fq "token-usage" /app/server/dist/routes/fallback.js
   grep -Fq "requireAdmin, (_req, res)" /app/server/dist/routes/fallback.js
-'
+LIVE_RUNTIME_CHECK
 
 docker exec "$CONTAINER" node --input-type=module -e '
   import Database from "better-sqlite3";
