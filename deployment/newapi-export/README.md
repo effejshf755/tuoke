@@ -27,7 +27,8 @@ the exact confirmation phrase `EXPORT_FRESH_MAINTENANCE_SNAPSHOT`.
 After confirming that the live database is in maintenance mode, the export
 creates a fresh online SQLite snapshot for that GitHub Actions run. The source
 volume is mounted read-only and SQLite `query_only` is enabled. The snapshot
-exists only beneath
+is normalized to a self-contained rollback-journal file and checked with
+`quick_check`. It exists only beneath
 `/root/tuoke-newapi-export-tmp`, and the shell exit trap removes both the
 snapshot and production-side ciphertext temporary file.
 

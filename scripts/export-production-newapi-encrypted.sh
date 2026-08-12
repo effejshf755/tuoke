@@ -114,24 +114,39 @@ docker run --rm \
 import Database from 'better-sqlite3';
 
 let source;
+let snapshot;
 try {
   source = new Database('/source/freeapi.db', { readonly: true, fileMustExist: true });
   source.pragma('query_only = ON');
   const maintenance = source.prepare("SELECT value FROM settings WHERE key = 'maintenance_mode'").get()?.value;
   if (maintenance !== '1') throw new Error('maintenance mode is not enabled');
   await source.backup('/snapshot/freeapi-snapshot.db');
+  source.close();
+  source = undefined;
+
+  // A backup of a WAL source may retain WAL in the database header even though
+  // the backup itself is complete. Normalize only the temporary snapshot so it
+  // is a self-contained file that can be mounted read-only by the encryptor.
+  snapshot = new Database('/snapshot/freeapi-snapshot.db', { fileMustExist: true });
+  const journalMode = String(snapshot.pragma('journal_mode = DELETE', { simple: true }) ?? '').toLowerCase();
+  if (journalMode !== 'delete') throw new Error('snapshot journal mode normalization failed');
+  if (snapshot.pragma('quick_check', { simple: true }) !== 'ok') throw new Error('snapshot quick_check failed');
+  const snapshotMaintenance = snapshot.prepare("SELECT value FROM settings WHERE key = 'maintenance_mode'").get()?.value;
+  if (snapshotMaintenance !== '1') throw new Error('snapshot maintenance marker is missing');
 } catch {
   console.error('fresh SQLite snapshot creation failed');
   process.exitCode = 1;
 } finally {
+  snapshot?.close();
   source?.close();
 }
 NODE
 
 [[ -s "$SNAPSHOT_DB" ]] || fail 'fresh SQLite snapshot was not created'
+[[ ! -e "$SNAPSHOT_DB-wal" && ! -e "$SNAPSHOT_DB-shm" && ! -e "$SNAPSHOT_DB-journal" ]] || fail 'fresh SQLite snapshot left a sidecar file'
 chmod 0600 "$SNAPSHOT_DB"
-readonly SNAPSHOT_CREATED_AT="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 verify_live_maintenance
+readonly SNAPSHOT_CREATED_AT="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 
 # Keep the production AES key only in process memory. Prefer the container's
 # runtime environment so Compose env indirections stay transparent, then use a
@@ -249,9 +264,7 @@ function main() {
   const db = new Database(DB_PATH, { readonly: true, fileMustExist: true });
   db.pragma('query_only = ON');
   const journalMode = String(db.pragma('journal_mode', { simple: true }) ?? '').toLowerCase();
-  if (journalMode === 'wal') {
-    throw new Error('snapshot unexpectedly retained WAL mode');
-  }
+  if (journalMode !== 'delete') throw new Error('snapshot is not a self-contained rollback-journal database');
   if (db.pragma('quick_check', { simple: true }) !== 'ok') throw new Error('snapshot quick_check failed');
   if (db.prepare("SELECT value FROM settings WHERE key = 'maintenance_mode'").get()?.value !== '1') {
     throw new Error('snapshot was not taken in maintenance mode');
