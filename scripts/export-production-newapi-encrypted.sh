@@ -201,8 +201,10 @@ const ENVELOPE_FORMAT = 'tuoke-newapi-export-envelope/v2';
 const OAEP_LABEL = Buffer.from('tuoke-newapi-export-key/v1', 'utf8');
 const DB_PATH = '/input/freeapi.db';
 
+let exportPhase = 'initialization';
+
 function abort() {
-  console.error('encrypted export generation failed');
+  console.error(`encrypted export generation failed at phase: ${exportPhase}`);
   process.exit(1);
 }
 
@@ -239,6 +241,7 @@ function assertColumns(db, table, required) {
 }
 
 function main() {
+  exportPhase = 'validate_runtime_inputs';
   const encryptionKey = requireHex('ENCRYPTION_KEY', process.env.ENCRYPTION_KEY?.trim(), 32);
   const runId = process.env.EXPORT_RUN_ID ?? '';
   const runAttemptText = process.env.EXPORT_RUN_ATTEMPT ?? '';
@@ -261,6 +264,7 @@ function main() {
     throw new Error('recipient key must be RSA with at least 2048 bits');
   }
 
+  exportPhase = 'open_snapshot';
   const db = new Database(DB_PATH, { readonly: true, fileMustExist: true });
   db.pragma('query_only = ON');
   const journalMode = String(db.pragma('journal_mode', { simple: true }) ?? '').toLowerCase();
@@ -270,6 +274,7 @@ function main() {
     throw new Error('snapshot was not taken in maintenance mode');
   }
 
+  exportPhase = 'validate_schema';
   const schema = {
     users: ['id', 'email', 'password_hash', 'created_at', 'role', 'status', 'balance_micro', 'reserved_balance_micro', 'deleted_at'],
     api_keys: ['id', 'platform', 'label', 'encrypted_key', 'iv', 'auth_tag', 'status', 'enabled', 'created_at', 'last_checked_at', 'base_url', 'role'],
@@ -295,6 +300,7 @@ function main() {
     return secret;
   };
 
+  exportPhase = 'read_users';
   const users = db.prepare(`
     SELECT id AS source_user_id, email, password_hash, role, status,
            balance_micro, reserved_balance_micro, deleted_at, created_at
@@ -302,6 +308,7 @@ function main() {
     ORDER BY id
   `).all();
 
+  exportPhase = 'read_provider_keys';
   const providerKeyRows = db.prepare(`
     SELECT id AS source_api_key_id, platform, label, encrypted_key, iv, auth_tag,
            status, enabled, base_url, created_at, last_checked_at
@@ -321,24 +328,23 @@ function main() {
     last_checked_at: row.last_checked_at,
   }));
 
+  exportPhase = 'read_provider_models';
   const providerModels = db.prepare(`
     SELECT m.id AS source_model_id, m.platform, m.model_id, m.upstream_model_id,
            m.display_name, m.intelligence_rank, m.speed_rank, m.size_label,
            m.rpm_limit, m.rpd_limit, m.tpm_limit, m.tpd_limit,
            m.monthly_token_budget, m.context_window, m.enabled,
-           m.supports_vision, m.supports_tools, m.key_id AS source_api_key_id,
+           m.supports_vision, m.supports_tools, k.id AS source_api_key_id,
            m.paid_input_per_m, m.paid_output_per_m
-    FROM models m
-    WHERE EXISTS (
-      SELECT 1
-      FROM api_keys k
-      WHERE k.role = 'provider'
-        AND ((m.key_id IS NOT NULL AND k.id = m.key_id)
-          OR (m.key_id IS NULL AND k.platform = m.platform))
-    )
-    ORDER BY m.platform, m.model_id, m.id
+    FROM api_keys k
+    JOIN models m
+      ON ((m.key_id IS NOT NULL AND k.id = m.key_id)
+        OR (m.key_id IS NULL AND k.platform = m.platform))
+    WHERE k.role = 'provider'
+    ORDER BY k.id, m.platform, m.model_id, m.id
   `).all();
 
+  exportPhase = 'read_relay_keys';
   const relayKeyRows = db.prepare(`
     SELECT k.id AS source_api_key_id, sk.source_id, k.platform,
            COALESCE(NULLIF(sk.label, ''), k.label) AS label,
@@ -363,6 +369,7 @@ function main() {
     updated_at: row.updated_at,
   }));
 
+  exportPhase = 'read_relay_topology';
   const relaySources = db.prepare(`
     SELECT id AS source_id, api_key_id AS primary_source_api_key_id, name,
            codex_group_id AS source_group_id, protocol, enabled, priority,
@@ -392,11 +399,12 @@ function main() {
     ORDER BY group_id, model_id
   `).all();
 
+  exportPhase = 'validate_relay_topology';
   const allRelayVaultCount = Number(db.prepare("SELECT COUNT(*) AS count FROM api_keys WHERE role = 'codex_relay'").get().count);
   const sourceIds = new Set(relaySources.map((row) => row.source_id));
   const relayKeyIds = new Set(relayKeys.map((row) => row.source_api_key_id));
   const groupIds = new Set(groups.map((row) => row.source_group_id));
-  if (allRelayVaultCount !== relayKeys.length) throw new Error('an unlinked relay credential exists');
+  if (allRelayVaultCount !== relayKeyIds.size) throw new Error('an unlinked relay credential exists');
   for (const source of relaySources) {
     if (!relayKeyIds.has(source.primary_source_api_key_id)) throw new Error('relay primary key is missing');
     if (source.source_group_id != null && !groupIds.has(source.source_group_id)) throw new Error('relay group is missing');
@@ -408,6 +416,7 @@ function main() {
 
   db.close();
 
+  exportPhase = 'build_payload';
   const exportedAt = new Date().toISOString();
   if (Date.parse(exportedAt) < Date.parse(snapshotCreatedAt)) throw new Error('export timestamp predates snapshot');
   const sourceDatabaseSha256 = hashFileSync(DB_PATH);
@@ -440,6 +449,7 @@ function main() {
     },
   };
 
+  exportPhase = 'encrypt_payload';
   const plaintext = Buffer.from(JSON.stringify(exportObject), 'utf8');
   const plaintextSha256 = crypto.createHash('sha256').update(plaintext).digest('hex');
   const publicKeySha256 = crypto.createHash('sha256').update(publicKey.export({ type: 'spki', format: 'der' })).digest('hex');
@@ -500,6 +510,7 @@ function main() {
     },
   };
 
+  exportPhase = 'emit_envelope';
   process.stdout.write(JSON.stringify(envelope));
   plaintext.fill(0);
   protectedBytes.fill(0);
