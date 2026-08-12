@@ -1,0 +1,74 @@
+name: Read-only User Usage Audit 20260812
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tuoke-production-readonly-audit
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SSHPASS: ${{ secrets.TUOKE_DEPLOY_PASSWORD_RELAY_STABILITY_V2_R1_RETRY_20260809 || secrets.TUOKE_DEPLOY_PASSWORD_RELAY_STABILITY_V2_DIAG_20260809 }}
+      AUDIT_HOST: 80.253.254.177
+      AUDIT_SCRIPT: scripts/audit-user-usage-readonly.mjs
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SSH client helper
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends sshpass
+
+      - name: Configure verified production host key
+        run: |
+          set -Eeuo pipefail
+          install -d -m 0700 "$HOME/.ssh"
+          cat > "$HOME/.ssh/known_hosts" <<'EOF'
+          80.253.254.177 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJS003ozsuy8Lbn3Km0Nf/ixxJEFTpLV8aiBEIHc/IO5
+          EOF
+          chmod 0600 "$HOME/.ssh/known_hosts"
+
+      - name: Run aggregate-only SQLite audit with read-only guards
+        run: |
+          set -Eeuo pipefail
+          test -n "$SSHPASS" || { echo 'audit credential is unavailable' >&2; exit 1; }
+          test -s "$AUDIT_SCRIPT"
+          node --check "$AUDIT_SCRIPT"
+          sshpass -e ssh \
+            -o BatchMode=no \
+            -o PreferredAuthentications=password \
+            -o PubkeyAuthentication=no \
+            -o StrictHostKeyChecking=yes \
+            "root@$AUDIT_HOST" 'bash -s' < <(
+              cat <<'REMOTE'
+          set -Eeuo pipefail
+          container='tuoke-prod-freellmapi-1'
+          expected_volume='tuoke-prod_freellmapi-data'
+          test "$(docker inspect --format '{{.State.Status}}' "$container")" = running
+          image="$(docker inspect --format '{{.Config.Image}}' "$container")"
+          image_id="$(docker inspect --format '{{.Image}}' "$container")"
+          volume="$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/app/server/data"}}{{.Name}}{{end}}{{end}}' "$container")"
+          test -n "$image"
+          test -n "$image_id"
+          test "$volume" = "$expected_volume"
+          test "$(docker image inspect --format '{{.Id}}' "$image")" = "$image_id"
+          docker run --rm -i \
+            --network none \
+            --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,size=16m \
+            --volume "$volume:/audit:ro" \
+            --entrypoint node \
+            "$image" \
+            --input-type=module -
+          REMOTE
+              cat "$AUDIT_SCRIPT"
+          )
