@@ -97,7 +97,7 @@ chmod 0700 "$SNAPSHOT_DIR"
 SNAPSHOT_DB="$SNAPSHOT_DIR/freeapi-snapshot.db"
 
 stage create_fresh_snapshot
-docker run --rm \
+docker run --rm -i \
   --network none \
   --read-only \
   --user 0:0 \
@@ -173,7 +173,7 @@ EXPORT_RUN_ATTEMPT="$RUN_ATTEMPT" \
 EXPORT_RUN_REPOSITORY="$RUN_REPOSITORY" \
 EXPORT_RUN_COMMIT="$RUN_COMMIT" \
 EXPORT_SNAPSHOT_CREATED_AT="$SNAPSHOT_CREATED_AT" \
-docker run --rm \
+docker run --rm -i \
   --network none \
   --read-only \
   --cap-drop ALL \
