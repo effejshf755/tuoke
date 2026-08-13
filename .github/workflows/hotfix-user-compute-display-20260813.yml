@@ -1,0 +1,74 @@
+name: Hotfix user compute display 20260813
+
+on:
+  push:
+    branches: [codex/hotfix-user-compute-display-20260813]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tuoke-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  hotfix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SSHPASS: ${{ secrets.TUOKE_DEPLOY_PASSWORD_RELAY_STABILITY_V2_R1_RETRY_20260809 }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+      - run: |
+          install -d -m 0700 "$HOME/.ssh"
+          printf '%s\n' '80.253.254.177 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJS003ozsuy8Lbn3Km0Nf/ixxJEFTpLV8aiBEIHc/IO5' > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/known_hosts"
+      - name: Patch user-visible usage to compute points
+        run: |
+          sshpass -e ssh -o BatchMode=no -o IdentitiesOnly=yes -o PreferredAuthentications=password -o PubkeyAuthentication=no -o StrictHostKeyChecking=yes root@80.253.254.177 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+          container=tuoke-prod-freellmapi-1
+          stamp=$(date -u +%Y%m%dT%H%M%SZ)
+          backup=/app/server/data/user-compute-display-$stamp
+          docker exec -u 0 "$container" mkdir -p "$backup"
+          docker exec -u 0 "$container" cp /app/server/dist/routes/user.js "$backup/user.js"
+          docker exec -u 0 "$container" cp /app/server/dist/routes/user-analytics.js "$backup/user-analytics.js"
+          rollback() {
+            docker exec -u 0 "$container" cp "$backup/user.js" /app/server/dist/routes/user.js
+            docker exec -u 0 "$container" cp "$backup/user-analytics.js" /app/server/dist/routes/user-analytics.js
+            docker restart "$container" >/dev/null
+          }
+          trap rollback ERR
+          docker exec -i -u 0 "$container" node --input-type=module - <<'NODE'
+          import fs from 'node:fs';
+          const userPath='/app/server/dist/routes/user.js';
+          const analyticsPath='/app/server/dist/routes/user-analytics.js';
+          let user=fs.readFileSync(userPath,'utf8');
+          const before=user;
+          user=user.replaceAll('SUM(input_tokens)', 'SUM(input_compute_points)')
+                   .replaceAll('SUM(output_tokens)', 'SUM(output_compute_points)')
+                   .replaceAll('SUM(input_tokens + output_tokens)', 'SUM(input_compute_points + output_compute_points)');
+          if(user===before || !user.includes('SUM(input_compute_points)')) throw new Error('user usage pattern mismatch');
+          fs.writeFileSync(userPath,user);
+          let analytics=fs.readFileSync(analyticsPath,'utf8');
+          const analyticsBefore=analytics;
+          analytics=analytics.replaceAll('SUM(input_tokens)', 'SUM(input_compute_points)')
+                             .replaceAll('SUM(output_tokens)', 'SUM(output_compute_points)')
+                             .replaceAll('SUM(r.input_tokens)', 'SUM(r.input_compute_points)')
+                             .replaceAll('SUM(r.output_tokens)', 'SUM(r.output_compute_points)')
+                             .replaceAll('status,input_tokens,output_tokens,', 'status,input_compute_points AS input_tokens,output_compute_points AS output_tokens,');
+          if(analytics===analyticsBefore || !analytics.includes('input_compute_points')) throw new Error('analytics pattern mismatch');
+          fs.writeFileSync(analyticsPath,analytics);
+          NODE
+          docker restart "$container" >/dev/null
+          for i in $(seq 1 20); do
+            if docker exec "$container" node -e 'fetch("http://127.0.0.1:"+(process.env.PORT||3001)+"/api/ping").then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))'; then break; fi
+            sleep 2
+          done
+          test "$(docker inspect --format '{{.State.Health.Status}}' "$container")" = healthy
+          trap - ERR
+          echo hotfix=ok
+          REMOTE
+      - name: Verify public API
+        run: curl --fail --silent --show-error --retry 8 --retry-delay 2 https://tuokeapi.com/api/ping
