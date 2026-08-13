@@ -1,0 +1,98 @@
+name: Repair Production Homepage 20260813
+
+on:
+  push:
+    branches:
+      - codex/repair-production-homepage-20260813
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tuoke-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  repair-homepage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DEPLOY_HOST: 80.253.254.177
+      DEPLOY_USER: root
+      SSHPASS: ${{ secrets.TUOKE_DEPLOY_PASSWORD_RELAY_STABILITY_V2_R1_RETRY_20260809 || secrets.TUOKE_DEPLOY_PASSWORD_RELAY_STABILITY_V2_DIAG_20260809 }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SSH client helper
+        run: |
+          set -Eeuo pipefail
+          test -n "$SSHPASS"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass
+
+      - name: Pin production host identity
+        run: |
+          set -Eeuo pipefail
+          install -d -m 0700 "$HOME/.ssh"
+          printf '%s\n' '80.253.254.177 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJS003ozsuy8Lbn3Km0Nf/ixxJEFTpLV8aiBEIHc/IO5' > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/known_hosts"
+
+      - name: Restore readable homepage permissions
+        run: |
+          set -Eeuo pipefail
+          sshpass -e ssh \
+            -o BatchMode=no \
+            -o IdentitiesOnly=yes \
+            -o PreferredAuthentications=password \
+            -o PubkeyAuthentication=no \
+            -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=20 \
+            "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+          container='tuoke-prod-freellmapi-1'
+          index_path='/app/client/dist/index.html'
+          marker='TUOKE_PRODUCTION_MAINTENANCE_20260812'
+          docker inspect "$container" >/dev/null
+          test "$(docker inspect --format '{{.State.Status}}' "$container")" = running
+          docker exec "$container" test -s "$index_path"
+          docker exec "$container" chmod 0644 "$index_path"
+          test "$(docker exec "$container" stat -c '%a' "$index_path")" = 644
+          if docker exec "$container" grep -Fq "$marker" "$index_path"; then
+            echo 'maintenance marker remains in homepage' >&2
+            exit 1
+          fi
+          docker exec "$container" node -e '
+            Promise.all([
+              fetch("http://127.0.0.1:3001/").then(async response => {
+                const body = await response.text();
+                if (!response.ok || !body.includes("<!doctype html")) throw new Error("homepage failed");
+              }),
+              fetch("http://127.0.0.1:3001/api/public/settings").then(async response => {
+                const body = await response.json();
+                if (!response.ok || body.maintenance_mode !== false) throw new Error("maintenance enabled");
+              }),
+            ]).catch(error => { console.error(error); process.exit(1); });
+          '
+          echo homepage_permissions=0644
+          echo maintenance_mode=off
+          REMOTE
+
+      - name: Verify public homepage
+        run: |
+          set -Eeuo pipefail
+          verified=0
+          for attempt in $(seq 1 20); do
+            stamp="${GITHUB_RUN_ID}-${attempt}"
+            if homepage="$(curl --fail --silent --show-error --connect-timeout 10 --max-time 30 "https://tuokeapi.com/?v=$stamp")" \
+              && grep -Fqi '<!doctype html' <<<"$homepage" \
+              && ! grep -Fq 'TUOKE_PRODUCTION_MAINTENANCE_20260812' <<<"$homepage" \
+              && settings="$(curl --fail --silent --show-error --connect-timeout 10 --max-time 30 "https://tuokeapi.com/api/public/settings?v=$stamp")" \
+              && python3 -c 'import json,sys; assert json.loads(sys.argv[1]).get("maintenance_mode") is False' "$settings"; then
+              verified=1
+              break
+            fi
+            sleep 3
+          done
+          test "$verified" -eq 1
+          echo public_homepage=available
