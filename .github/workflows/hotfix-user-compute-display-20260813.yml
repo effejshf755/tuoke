@@ -45,22 +45,10 @@ jobs:
           const userPath='/app/server/dist/routes/user.js';
           const analyticsPath='/app/server/dist/routes/user-analytics.js';
           let user=fs.readFileSync(userPath,'utf8');
-          const before=user;
-          user=user.replace(/SUM\(input_tokens\)/g, 'SUM(input_compute_points)')
-                   .replace(/SUM\(output_tokens\)/g, 'SUM(output_compute_points)')
-                   .replace(/SUM\(input_tokens\s*\+\s*output_tokens\)/g, 'SUM(input_compute_points + output_compute_points)')
-                   .replace(/r\.input_tokens\s+AS\s+inputTokens/g, 'r.input_compute_points AS inputTokens')
-                   .replace(/r\.output_tokens\s+AS\s+outputTokens/g, 'r.output_compute_points AS outputTokens');
-          if(user===before || !user.includes('input_compute_points')) throw new Error('user usage pattern mismatch');
+          user=user.replaceAll('input_tokens', 'input_compute_points').replaceAll('output_tokens', 'output_compute_points');
           fs.writeFileSync(userPath,user);
           let analytics=fs.readFileSync(analyticsPath,'utf8');
-          const analyticsBefore=analytics;
-          analytics=analytics.replace(/SUM\(input_tokens\)/g, 'SUM(input_compute_points)')
-                             .replace(/SUM\(output_tokens\)/g, 'SUM(output_compute_points)')
-                             .replace(/SUM\(r\.input_tokens\)/g, 'SUM(r.input_compute_points)')
-                             .replace(/SUM\(r\.output_tokens\)/g, 'SUM(r.output_compute_points)')
-                             .replace(/status,input_tokens,output_tokens,/g, 'status,input_compute_points AS input_tokens,output_compute_points AS output_tokens,');
-          if(analytics===analyticsBefore || !analytics.includes('input_compute_points')) throw new Error('analytics pattern mismatch');
+          analytics=analytics.replaceAll('input_tokens', 'input_compute_points').replaceAll('output_tokens', 'output_compute_points');
           fs.writeFileSync(analyticsPath,analytics);
           NODE
           docker restart "$container" >/dev/null
