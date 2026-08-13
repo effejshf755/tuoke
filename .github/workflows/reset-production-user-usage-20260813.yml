@@ -1,0 +1,331 @@
+name: Reset Production User Usage 20260813
+
+on:
+  push:
+    branches:
+      - codex/reset-production-user-usage-20260813
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tuoke-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  reset-usage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DEPLOY_HOST: 80.253.254.177
+      DEPLOY_USER: root
+      SSHPASS: ${{ secrets.TUOKE_DEPLOY_PASSWORD_RELAY_STABILITY_V2_R1_RETRY_20260809 || secrets.TUOKE_DEPLOY_PASSWORD_RELAY_STABILITY_V2_DIAG_20260809 }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SSH client helper
+        run: |
+          set -Eeuo pipefail
+          test -n "$SSHPASS" || { echo "production credential secret is unavailable" >&2; exit 1; }
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass
+
+      - name: Pin production host identity
+        run: |
+          set -Eeuo pipefail
+          install -d -m 0700 "$HOME/.ssh"
+          printf '%s\n' '80.253.254.177 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJS003ozsuy8Lbn3Km0Nf/ixxJEFTpLV8aiBEIHc/IO5' > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/known_hosts"
+
+      - name: Back up, reset usage, and leave maintenance mode
+        run: |
+          set -Eeuo pipefail
+          sshpass -e ssh \
+            -o BatchMode=no \
+            -o IdentitiesOnly=yes \
+            -o PreferredAuthentications=password \
+            -o PubkeyAuthentication=no \
+            -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=20 \
+            "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+          umask 077
+
+          container='tuoke-prod-freellmapi-1'
+          data_volume='tuoke-prod_freellmapi-data'
+          db_path='/app/server/data/freeapi.db'
+          index_path='/app/client/dist/index.html'
+          marker='TUOKE_PRODUCTION_MAINTENANCE_20260812'
+          stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+          backup_dir="/root/tuoke-backups/user-usage-reset-${stamp}"
+          container_backup="/app/server/data/.user-usage-reset-${stamp}.db"
+          container_summary="/app/server/data/.user-usage-reset-${stamp}.json"
+
+          stage() { printf 'stage=%s\n' "$1"; }
+
+          stage preflight
+          test "$(id -u)" -eq 0
+          docker inspect "$container" >/dev/null
+          test "$(docker inspect --format '{{.State.Status}}' "$container")" = running
+          test "$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$container")" = healthy
+          test "$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/app/server/data"}}{{.Name}}{{end}}{{end}}' "$container")" = "$data_volume"
+          docker exec "$container" test -s "$db_path"
+          docker exec "$container" test -s "$index_path"
+          install -d -m 0700 "$backup_dir"
+
+          # Keep the API closed throughout the backup and reset. This is
+          # idempotent and also protects the operation if the visual overlay
+          # was present while the database flag drifted.
+          docker exec -i "$container" node --input-type=module - <<'NODE'
+          import Database from 'better-sqlite3';
+          const db = new Database('/app/server/data/freeapi.db', { fileMustExist: true });
+          db.prepare("INSERT INTO settings(key,value) VALUES('maintenance_mode','1') ON CONFLICT(key) DO UPDATE SET value='1'").run();
+          db.close();
+          NODE
+
+          stage backup
+          docker cp "$container:$index_path" "$backup_dir/index.html.maintenance"
+          chmod 0600 "$backup_dir/index.html.maintenance"
+          original_index="$(find /root/tuoke-backups -mindepth 2 -maxdepth 2 -type f -path '*/maintenance-*/index.html.before' -printf '%T@ %p\n' | sort -nr | head -n 1 | cut -d' ' -f2-)"
+          test -n "$original_index"
+          test -s "$original_index"
+          if grep -Fq "$marker" "$original_index"; then
+            echo 'maintenance backup unexpectedly contains the overlay marker' >&2
+            exit 1
+          fi
+          cp -- "$original_index" "$backup_dir/index.html.restore"
+          chmod 0600 "$backup_dir/index.html.restore"
+
+          docker exec -i "$container" node --input-type=module - "$container_backup" <<'NODE'
+          import Database from 'better-sqlite3';
+          const target = process.argv[2];
+          const db = new Database('/app/server/data/freeapi.db', { readonly: true, fileMustExist: true });
+          await db.backup(target);
+          db.close();
+          const copy = new Database(target, { readonly: true, fileMustExist: true });
+          if (copy.pragma('quick_check', { simple: true }) !== 'ok') {
+            throw new Error('backup quick_check failed');
+          }
+          copy.close();
+          NODE
+          docker cp "$container:$container_backup" "$backup_dir/freeapi-before.db"
+          docker exec "$container" rm -f -- "$container_backup"
+          test -s "$backup_dir/freeapi-before.db"
+          sha256sum "$backup_dir/freeapi-before.db" "$backup_dir/index.html.maintenance" "$backup_dir/index.html.restore" > "$backup_dir/SHA256SUMS"
+
+          stage reset
+          docker exec -i "$container" node --input-type=module - "$container_summary" <<'NODE'
+          import crypto from 'node:crypto';
+          import fs from 'node:fs';
+          import Database from 'better-sqlite3';
+
+          const summaryPath = process.argv[2];
+          const db = new Database('/app/server/data/freeapi.db', { fileMustExist: true });
+          db.pragma('busy_timeout = 30000');
+          db.pragma('foreign_keys = ON');
+
+          const tableExists = (name) => Boolean(db.prepare(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+          ).get(name));
+          const rows = (sql) => db.prepare(sql).all();
+          const scalar = (sql) => Number(db.prepare(sql).pluck().get() ?? 0);
+          const hashRows = (value) => crypto
+            .createHash('sha256')
+            .update(JSON.stringify(value))
+            .digest('hex');
+
+          const balanceRowsBefore = rows(
+            'SELECT id, balance_micro FROM users ORDER BY id',
+          );
+          const walletRowsBefore = rows(
+            'SELECT * FROM wallet_transactions ORDER BY id',
+          );
+          const walletFinancialRows = (walletRows) => walletRows.map((row) => {
+            const { request_id: _requestId, ...financial } = row;
+            return financial;
+          });
+          const protectedBefore = {
+            users: scalar('SELECT COUNT(*) FROM users'),
+            consumerApiKeys: tableExists('consumer_api_keys')
+              ? scalar('SELECT COUNT(*) FROM consumer_api_keys') : 0,
+            upstreamApiKeys: tableExists('api_keys')
+              ? scalar('SELECT COUNT(*) FROM api_keys') : 0,
+            relaySources: tableExists('codex_relay_sources')
+              ? scalar('SELECT COUNT(*) FROM codex_relay_sources') : 0,
+            relayKeys: tableExists('codex_relay_source_keys')
+              ? scalar('SELECT COUNT(*) FROM codex_relay_source_keys') : 0,
+          };
+          const before = {
+            requests: tableExists('requests') ? scalar('SELECT COUNT(*) FROM requests') : 0,
+            requestHourly: tableExists('request_hourly') ? scalar('SELECT COUNT(*) FROM request_hourly') : 0,
+            freeDaily: tableExists('free_model_daily_usage') ? scalar('SELECT COUNT(*) FROM free_model_daily_usage') : 0,
+            resourceReservations: tableExists('resource_quota_reservations') ? scalar('SELECT COUNT(*) FROM resource_quota_reservations') : 0,
+            resourceLedger: tableExists('resource_quota_ledger') ? scalar('SELECT COUNT(*) FROM resource_quota_ledger') : 0,
+          };
+
+          const reset = db.transaction(() => {
+            if (tableExists('resource_dispatches')) {
+              db.prepare('DELETE FROM resource_dispatches').run();
+            }
+            if (tableExists('resource_quota_ledger')) {
+              db.prepare('DELETE FROM resource_quota_ledger').run();
+            }
+            if (tableExists('resource_quota_reservations')) {
+              db.prepare('DELETE FROM resource_quota_reservations').run();
+            }
+            if (tableExists('resource_member_quotas')) {
+              db.prepare('UPDATE resource_member_quotas SET used_units=0, reserved_units=0').run();
+            }
+            if (tableExists('resource_subpool_quota_periods')) {
+              db.prepare('UPDATE resource_subpool_quota_periods SET used_units=0, reserved_units=0').run();
+            }
+            if (tableExists('free_model_daily_usage')) {
+              db.prepare('DELETE FROM free_model_daily_usage').run();
+            }
+            if (tableExists('request_hourly')) {
+              db.prepare('DELETE FROM request_hourly').run();
+            }
+            if (tableExists('requests')) {
+              db.prepare('DELETE FROM requests').run();
+            }
+            if (tableExists('settings')) {
+              const zeroSetting = db.prepare(
+                "INSERT INTO settings(key,value) VALUES(?, '0') ON CONFLICT(key) DO UPDATE SET value='0'",
+              );
+              for (const key of [
+                'total_requests',
+                'total_input_tokens',
+                'total_cached_input_tokens',
+                'total_cache_write_tokens',
+                'total_output_tokens',
+              ]) zeroSetting.run(key);
+              db.prepare("DELETE FROM settings WHERE key='first_request_at'").run();
+            }
+
+            const balanceRowsAfter = rows(
+              'SELECT id, balance_micro FROM users ORDER BY id',
+            );
+            const walletRowsAfter = rows(
+              'SELECT * FROM wallet_transactions ORDER BY id',
+            );
+            const protectedAfter = {
+              users: scalar('SELECT COUNT(*) FROM users'),
+              consumerApiKeys: tableExists('consumer_api_keys')
+                ? scalar('SELECT COUNT(*) FROM consumer_api_keys') : 0,
+              upstreamApiKeys: tableExists('api_keys')
+                ? scalar('SELECT COUNT(*) FROM api_keys') : 0,
+              relaySources: tableExists('codex_relay_sources')
+                ? scalar('SELECT COUNT(*) FROM codex_relay_sources') : 0,
+              relayKeys: tableExists('codex_relay_source_keys')
+                ? scalar('SELECT COUNT(*) FROM codex_relay_source_keys') : 0,
+            };
+            if (hashRows(balanceRowsAfter) !== hashRows(balanceRowsBefore)) {
+              throw new Error('user balances changed during usage reset');
+            }
+            if (hashRows(walletFinancialRows(walletRowsAfter)) !== hashRows(walletFinancialRows(walletRowsBefore))) {
+              throw new Error('wallet financial ledger changed during usage reset');
+            }
+            if (JSON.stringify(protectedAfter) !== JSON.stringify(protectedBefore)) {
+              throw new Error('protected account or key counts changed during usage reset');
+            }
+            if (tableExists('requests') && scalar('SELECT COUNT(*) FROM requests') !== 0) {
+              throw new Error('requests were not reset');
+            }
+            if (tableExists('request_hourly') && scalar('SELECT COUNT(*) FROM request_hourly') !== 0) {
+              throw new Error('request_hourly was not reset');
+            }
+
+            return {
+              before,
+              protected: protectedAfter,
+              userBalanceHash: hashRows(balanceRowsAfter),
+              walletFinancialLedgerHash: hashRows(walletFinancialRows(walletRowsAfter)),
+              balanceTotalMicro: balanceRowsAfter.reduce(
+                (sum, row) => sum + Number(row.balance_micro ?? 0), 0,
+              ),
+            };
+          });
+
+          const summary = reset();
+          if (db.pragma('quick_check', { simple: true }) !== 'ok') {
+            throw new Error('live database quick_check failed after reset');
+          }
+          db.close();
+          fs.writeFileSync(summaryPath, `${JSON.stringify(summary, null, 2)}\n`, { mode: 0o600 });
+          console.log(`requests_reset=${summary.before.requests}`);
+          console.log(`users_preserved=${summary.protected.users}`);
+          console.log(`consumer_keys_preserved=${summary.protected.consumerApiKeys}`);
+          console.log(`wallet_rows_preserved=${walletRowsBefore.length}`);
+          console.log(`balance_total_micro_preserved=${summary.balanceTotalMicro}`);
+          NODE
+          docker cp "$container:$container_summary" "$backup_dir/reset-summary.json"
+          docker exec "$container" rm -f -- "$container_summary"
+          test -s "$backup_dir/reset-summary.json"
+
+          stage restore_homepage
+          docker cp "$backup_dir/index.html.restore" "$container:$index_path"
+          docker exec "$container" test -s "$index_path"
+          if docker exec "$container" grep -Fq "$marker" "$index_path"; then
+            echo 'maintenance overlay marker remains after homepage restore' >&2
+            exit 1
+          fi
+
+          stage disable_maintenance
+          docker exec -i "$container" node --input-type=module - <<'NODE'
+          import Database from 'better-sqlite3';
+          const db = new Database('/app/server/data/freeapi.db', { fileMustExist: true });
+          db.prepare("INSERT INTO settings(key,value) VALUES('maintenance_mode','0') ON CONFLICT(key) DO UPDATE SET value='0'").run();
+          const value = db.prepare("SELECT value FROM settings WHERE key='maintenance_mode'").get()?.value;
+          if (value !== '0') throw new Error('maintenance mode was not disabled');
+          if (db.pragma('quick_check', { simple: true }) !== 'ok') throw new Error('final quick_check failed');
+          db.close();
+          NODE
+
+          stage local_verify
+          docker exec "$container" node -e '
+            Promise.all([
+              fetch("http://127.0.0.1:3001/api/ping").then(async response => {
+                const body = await response.json();
+                if (!response.ok || body.status !== "ok") throw new Error("ping failed");
+              }),
+              fetch("http://127.0.0.1:3001/api/public/settings").then(async response => {
+                const body = await response.json();
+                if (!response.ok || body.maintenance_mode !== false) throw new Error("maintenance still enabled");
+              }),
+            ]).catch(error => { console.error(error); process.exit(1); });
+          '
+          sha256sum "$backup_dir/reset-summary.json" >> "$backup_dir/SHA256SUMS"
+          echo "backup_dir=$backup_dir"
+          echo usage_reset=ok
+          echo balances_preserved=ok
+          echo wallet_ledger_preserved=ok
+          echo maintenance_mode=off
+          REMOTE
+
+      - name: Verify public website is available
+        run: |
+          set -Eeuo pipefail
+          verified=0
+          for attempt in $(seq 1 20); do
+            stamp="${GITHUB_RUN_ID}-${attempt}"
+            if ping="$(curl --fail --silent --show-error --connect-timeout 10 --max-time 30 "https://tuokeapi.com/api/ping?v=$stamp")" \
+              && python3 -c 'import json,sys; assert json.loads(sys.argv[1]).get("status") == "ok"' "$ping" \
+              && settings="$(curl --fail --silent --show-error --connect-timeout 10 --max-time 30 "https://tuokeapi.com/api/public/settings?v=$stamp")" \
+              && python3 -c 'import json,sys; assert json.loads(sys.argv[1]).get("maintenance_mode") is False' "$settings" \
+              && homepage="$(curl --fail --silent --show-error --connect-timeout 10 --max-time 30 "https://tuokeapi.com/?v=$stamp")" \
+              && ! grep -Fq 'TUOKE_PRODUCTION_MAINTENANCE_20260812' <<<"$homepage"; then
+              verified=1
+              break
+            fi
+            sleep 3
+          done
+          test "$verified" -eq 1
+          status="$(curl --silent --output response.txt --write-out '%{http_code}' \
+            --connect-timeout 10 --max-time 30 \
+            -X POST 'https://tuokeapi.com/v1/responses' \
+            -H 'content-type: application/json' \
+            --data '{"model":"maintenance-check","input":"test"}')"
+          test "$status" != 503
+          ! grep -Fq 'maintenance_mode' response.txt
+          echo public_website=available
