@@ -46,18 +46,20 @@ jobs:
           const analyticsPath='/app/server/dist/routes/user-analytics.js';
           let user=fs.readFileSync(userPath,'utf8');
           const before=user;
-          user=user.replaceAll('SUM(input_tokens)', 'SUM(input_compute_points)')
-                   .replaceAll('SUM(output_tokens)', 'SUM(output_compute_points)')
-                   .replaceAll('SUM(input_tokens + output_tokens)', 'SUM(input_compute_points + output_compute_points)');
-          if(user===before || !user.includes('SUM(input_compute_points)')) throw new Error('user usage pattern mismatch');
+          user=user.replace(/SUM\(input_tokens\)/g, 'SUM(input_compute_points)')
+                   .replace(/SUM\(output_tokens\)/g, 'SUM(output_compute_points)')
+                   .replace(/SUM\(input_tokens\s*\+\s*output_tokens\)/g, 'SUM(input_compute_points + output_compute_points)')
+                   .replace(/r\.input_tokens\s+AS\s+inputTokens/g, 'r.input_compute_points AS inputTokens')
+                   .replace(/r\.output_tokens\s+AS\s+outputTokens/g, 'r.output_compute_points AS outputTokens');
+          if(user===before || !user.includes('input_compute_points')) throw new Error('user usage pattern mismatch');
           fs.writeFileSync(userPath,user);
           let analytics=fs.readFileSync(analyticsPath,'utf8');
           const analyticsBefore=analytics;
-          analytics=analytics.replaceAll('SUM(input_tokens)', 'SUM(input_compute_points)')
-                             .replaceAll('SUM(output_tokens)', 'SUM(output_compute_points)')
-                             .replaceAll('SUM(r.input_tokens)', 'SUM(r.input_compute_points)')
-                             .replaceAll('SUM(r.output_tokens)', 'SUM(r.output_compute_points)')
-                             .replaceAll('status,input_tokens,output_tokens,', 'status,input_compute_points AS input_tokens,output_compute_points AS output_tokens,');
+          analytics=analytics.replace(/SUM\(input_tokens\)/g, 'SUM(input_compute_points)')
+                             .replace(/SUM\(output_tokens\)/g, 'SUM(output_compute_points)')
+                             .replace(/SUM\(r\.input_tokens\)/g, 'SUM(r.input_compute_points)')
+                             .replace(/SUM\(r\.output_tokens\)/g, 'SUM(r.output_compute_points)')
+                             .replace(/status,input_tokens,output_tokens,/g, 'status,input_compute_points AS input_tokens,output_compute_points AS output_tokens,');
           if(analytics===analyticsBefore || !analytics.includes('input_compute_points')) throw new Error('analytics pattern mismatch');
           fs.writeFileSync(analyticsPath,analytics);
           NODE
