@@ -1,0 +1,61 @@
+name: Diagnose Production SSH 20260813
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      DEPLOY_HOST: 80.253.254.177
+      DEPLOY_USER: root
+      SSHPASS: ${{ secrets.TUOKE_DEPLOY_PASSWORD_RELAY_STABILITY_V2_R1_RETRY_20260809 || secrets.TUOKE_DEPLOY_PASSWORD_RELAY_STABILITY_V2_DIAG_20260809 }}
+
+    steps:
+      - name: Install SSH client helper
+        run: |
+          set -Eeuo pipefail
+          test -n "$SSHPASS"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass
+
+      - name: Pin production host identity
+        run: |
+          set -Eeuo pipefail
+          install -d -m 0700 "$HOME/.ssh"
+          printf '%s\n' '80.253.254.177 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJS003ozsuy8Lbn3Km0Nf/ixxJEFTpLV8aiBEIHc/IO5' > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/known_hosts"
+
+      - name: Check SSH and read service state
+        run: |
+          set -Eeuo pipefail
+          sshpass -e ssh \
+            -o BatchMode=no \
+            -o IdentitiesOnly=yes \
+            -o PreferredAuthentications=password \
+            -o PubkeyAuthentication=no \
+            -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=20 \
+            "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+          echo ssh_login=ok
+          echo kernel="$(uname -sr)"
+          if command -v systemctl >/dev/null 2>&1; then
+            echo ssh_service_active="$(systemctl is-active ssh 2>/dev/null || systemctl is-active sshd 2>/dev/null || true)"
+          fi
+          echo listening_sockets_begin
+          ss -lntp 2>/dev/null | awk 'NR == 1 || /:22([[:space:]]|$)/'
+          echo listening_sockets_end
+          if command -v ufw >/dev/null 2>&1; then
+            echo ufw_status_begin
+            ufw status 2>/dev/null || true
+            echo ufw_status_end
+          fi
+          if command -v firewall-cmd >/dev/null 2>&1; then
+            echo firewalld_state="$(firewall-cmd --state 2>/dev/null || true)"
+          fi
+          REMOTE
