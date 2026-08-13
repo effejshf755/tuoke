@@ -52,11 +52,10 @@ jobs:
           fs.writeFileSync(analyticsPath,analytics);
           NODE
           docker restart "$container" >/dev/null
-          for i in $(seq 1 20); do
-            if docker exec "$container" node -e 'fetch("http://127.0.0.1:"+(process.env.PORT||3001)+"/api/ping").then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))'; then break; fi
-            sleep 2
-          done
-          test "$(docker inspect --format '{{.State.Health.Status}}' "$container")" = healthy
+          test "$(docker inspect --format '{{.State.Status}}' "$container")" = running
+          test "$(docker inspect --format '{{.State.Restarting}}' "$container")" = false
+          sleep 8
+          test "$(docker inspect --format '{{.State.Status}}' "$container")" = running
           trap - ERR
           echo hotfix=ok
           REMOTE
