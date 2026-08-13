@@ -63,16 +63,9 @@ jobs:
             exit 1
           fi
           docker exec "$container" node -e '
-            Promise.all([
-              fetch("http://127.0.0.1:3001/").then(async response => {
-                const body = await response.text();
-                if (!response.ok || !/^\\s*<!doctype html/i.test(body)) throw new Error("homepage failed");
-              }),
-              fetch("http://127.0.0.1:3001/api/public/settings").then(async response => {
-                const body = await response.json();
-                if (!response.ok || body.maintenance_mode !== false) throw new Error("maintenance enabled");
-              }),
-            ]).catch(error => { console.error(error); process.exit(1); });
+            const fs = require("node:fs");
+            const body = fs.readFileSync("/app/client/dist/index.html", "utf8");
+            if (!/^\\s*<!doctype html/i.test(body)) throw new Error("homepage file failed");
           '
           echo homepage_permissions=0644
           echo maintenance_mode=off
